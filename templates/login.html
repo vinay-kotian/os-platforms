@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Zerodha Login - Flask App{% endblock %}
+
+{% block content %}
+<h1>Zerodha API Login</h1>
+<p>Enter your Zerodha API credentials to access stock data</p>
+
+<!-- Flash Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else category }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+<div class="login-container">
+    <div class="login-form">
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="form-group">
+                <label for="api_key">API Key:</label>
+                <input type="text" 
+                       id="api_key" 
+                       name="api_key" 
+                       class="form-control"
+                       placeholder="Enter your Zerodha API Key"
+                       required>
+            </div>
+            
+            <div class="form-group">
+                <label for="api_secret">API Secret:</label>
+                <input type="password" 
+                       id="api_secret" 
+                       name="api_secret" 
+                       class="form-control"
+                       placeholder="Enter your Zerodha API Secret"
+                       required>
+            </div>
+            
+            <button type="submit" class="btn btn-primary">Login to Zerodha</button>
+        </form>
+    </div>
+    
+    {% if login_url %}
+    <div class="zerodha-login">
+        <h3>Complete Login Process</h3>
+        <p>Click the button below to complete the login process with Zerodha:</p>
+        <a href="{{ login_url }}" class="btn btn-success" target="_blank">
+            Complete Zerodha Login
+        </a>
+        <p class="note">
+            <em>Note: After completing login on Zerodha, you will be redirected back to this application.</em>
+        </p>
+    </div>
+    {% endif %}
+</div>
+
+<div class="help-section">
+    <h3>How to get your API credentials:</h3>
+    <ol>
+        <li>Log in to your Zerodha Kite account</li>
+        <li>Go to <strong>My Account → API</strong></li>
+        <li>Generate your API key and secret</li>
+        <li>Enter them in the form above</li>
+    </ol>
+</div>
+{% endblock %}

@@ -3,6 +3,8 @@
 {% block title %}Home - Flask App{% endblock %}
 
 {% block content %}
-<h1>Welcome to Flask App</h1>
+<h1>Welcome Jayant's Website</h1>
 <p>This is the home page of your Flask application.</p>
+<p><a href="{{ url_for('login') }}">Login to Zerodha</a></p>
+<p><a href="{{ url_for('prices') }}">View Nifty and Bank Nifty Prices</a></p>
 {% endblock %}

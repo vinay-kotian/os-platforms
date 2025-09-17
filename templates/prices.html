@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Stock Prices - Flask App{% endblock %}
+
+{% block content %}
+<h1>Stock Prices</h1>
+<p>Current Nifty and Bank Nifty prices</p>
+
+<!-- Flash Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ 'danger' if category == 'error' else category }}">
+                {{ message }}
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+
+{% if prices %}
+<div class="prices-container">
+    <div class="price-card">
+        <h2>{{ prices.nifty.name }}</h2>
+        <div class="price-info">
+            <div class="current-price">₹{{ "%.2f"|format(prices.nifty.current_price) }}</div>
+            <div class="change {% if prices.nifty.change >= 0 %}positive{% else %}negative{% endif %}">
+                {% if prices.nifty.change >= 0 %}+{% endif %}{{ "%.2f"|format(prices.nifty.change) }} 
+                ({% if prices.nifty.change_percent >= 0 %}+{% endif %}{{ "%.2f"|format(prices.nifty.change_percent) }}%)
+            </div>
+        </div>
+        <div class="last-updated">Last updated: {{ prices.nifty.last_updated }}</div>
+    </div>
+
+    <div class="price-card">
+        <h2>{{ prices.bank_nifty.name }}</h2>
+        <div class="price-info">
+            <div class="current-price">₹{{ "%.2f"|format(prices.bank_nifty.current_price) }}</div>
+            <div class="change {% if prices.bank_nifty.change >= 0 %}positive{% else %}negative{% endif %}">
+                {% if prices.bank_nifty.change >= 0 %}+{% endif %}{{ "%.2f"|format(prices.bank_nifty.change) }} 
+                ({% if prices.bank_nifty.change_percent >= 0 %}+{% endif %}{{ "%.2f"|format(prices.bank_nifty.change_percent) }}%)
+            </div>
+        </div>
+        <div class="last-updated">Last updated: {{ prices.bank_nifty.last_updated }}</div>
+    </div>
+</div>
+
+<div class="refresh-section">
+    <button onclick="refreshPrices()" class="btn btn-primary">Refresh Prices</button>
+    <p class="refresh-note">Click to get the latest stock prices</p>
+</div>
+
+{% else %}
+<div class="no-data">
+    <h3>Unable to fetch stock prices</h3>
+    <p>Please make sure you are logged in and try again.</p>
+    <a href="{{ url_for('login') }}" class="btn btn-primary">Login to Zerodha</a>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshPrices() {
+    // Reload the page to fetch fresh data
+    window.location.reload();
+}
+
+// Auto-refresh every 30 seconds
+setInterval(function() {
+    refreshPrices();
+}, 30000);
+</script>
+{% endblock %}
