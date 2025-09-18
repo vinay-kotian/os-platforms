@@ -1,4 +1,5 @@
 import os
+import json
 from flask import Flask, redirect, request, session, url_for, render_template, flash
 from flask.json import jsonify
 from kiteconnect import KiteConnect
@@ -9,10 +10,51 @@ logging.basicConfig(level=logging.DEBUG)
 app = Flask(__name__)
 app.secret_key = "thisisasecretkey"   # needed for session handling
 
+# File to store persistent session data
+SESSION_FILE = 'session_data.json'
+
 # Global variables to store user's API credentials
 user_api_key = None
 user_api_secret = None
 kite = None
+
+def load_session_data():
+    """Load session data from file"""
+    global user_api_key, user_api_secret, kite
+    
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, 'r') as f:
+                data = json.load(f)
+                user_api_key = data.get('api_key')
+                user_api_secret = data.get('api_secret')
+                access_token = data.get('access_token')
+                
+                if user_api_key and access_token:
+                    kite = KiteConnect(api_key=user_api_key)
+                    kite.set_access_token(access_token)
+                    print("Loaded existing session from file")
+                    return True
+        except Exception as e:
+            print(f"Error loading session: {e}")
+    return False
+
+def save_session_data():
+    """Save session data to file"""
+    try:
+        data = {
+            'api_key': user_api_key,
+            'api_secret': user_api_secret,
+            'access_token': session.get('access_token')
+        }
+        with open(SESSION_FILE, 'w') as f:
+            json.dump(data, f)
+        print("Session data saved to file")
+    except Exception as e:
+        print(f"Error saving session: {e}")
+
+# Load existing session on startup
+load_session_data()
 
 @app.route('/')
 def index():
@@ -86,6 +128,9 @@ def login_callback():
         session["access_token"] = access_token
         kite.set_access_token(access_token)
         
+        # Save to file for persistence
+        save_session_data()
+        
         flash('Login successful! You can now access stock data.', 'success')
         return redirect(url_for('index'))
         
@@ -134,11 +179,60 @@ def prices():
 
 @app.route('/stocks/fetch-price')
 def fetch_prices():
-    prices = {
-        'NIFTY50': kite.ltp("NSE:NIFTY 50").get('NSE:NIFTY 50').get('last_price'),
-        'BANKNIFTY': kite.ltp("NSE:NIFTY BANK").get('NSE:NIFTY BANK').get('last_price')
-    }  
-    return jsonify(prices)
+    """API endpoint to fetch current stock prices"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        # Fetch live prices using the same logic as the main prices page
+        nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+        bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+        
+        # Format the data to match the template structure
+        prices_data = {
+            'nifty': {
+                'name': nifty_data.get('tradingsymbol', 'N/A'),
+                'current_price': nifty_data.get('last_price', 0),
+                'change': nifty_data.get('net_change', 0),
+                'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
+                'last_updated': nifty_data.get('timestamp', 'N/A')
+            },
+            'bank_nifty': {
+                'name': bank_nifty_data.get('tradingsymbol', 'N/A'),
+                'current_price': bank_nifty_data.get('last_price', 0),
+                'change': bank_nifty_data.get('net_change', 0),
+                'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
+                'last_updated': bank_nifty_data.get('timestamp', 'N/A')
+            }
+        }
+        
+        return jsonify(prices_data)
+        
+    except Exception as e:
+        return jsonify({'error': f'Error fetching stock prices: {str(e)}'}), 500
+
+@app.route('/logout')
+def logout():
+    """Logout and clear session data"""
+    global user_api_key, user_api_secret, kite
+    
+    # Clear global variables
+    user_api_key = None
+    user_api_secret = None
+    kite = None
+    
+    # Clear session
+    session.clear()
+    
+    # Remove session file
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+    
+    flash('Logged out successfully', 'success')
+    return redirect(url_for('index'))
 
 @app.errorhandler(404)
 def not_found(error):

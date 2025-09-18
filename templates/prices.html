@@ -61,8 +61,64 @@
 {% block scripts %}
 <script>
 function refreshPrices() {
-    // Reload the page to fetch fresh data
-    window.location.reload();
+    // Show loading state
+    const refreshBtn = document.querySelector('.btn-primary');
+    const originalText = refreshBtn.textContent;
+    refreshBtn.textContent = 'Refreshing...';
+    refreshBtn.disabled = true;
+    
+    // Make AJAX call to fetch fresh data
+    fetch('/stocks/fetch-price')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.error) {
+                throw new Error(data.error);
+            }
+            
+            // Update Nifty data
+            updatePriceCard('nifty', data.nifty);
+            
+            // Update Bank Nifty data
+            updatePriceCard('bank_nifty', data.bank_nifty);
+            
+            console.log('Prices updated successfully');
+        })
+        .catch(error => {
+            console.error('Error refreshing prices:', error);
+            alert('Error refreshing prices: ' + error.message);
+        })
+        .finally(() => {
+            // Reset button state
+            refreshBtn.textContent = originalText;
+            refreshBtn.disabled = false;
+        });
+}
+
+function updatePriceCard(type, data) {
+    const card = document.querySelector(`.price-card:nth-child(${type === 'nifty' ? '1' : '2'})`);
+    
+    // Update price
+    const priceElement = card.querySelector('.current-price');
+    priceElement.textContent = `₹${parseFloat(data.current_price).toFixed(2)}`;
+    
+    // Update change
+    const changeElement = card.querySelector('.change');
+    const change = parseFloat(data.change);
+    const changePercent = parseFloat(data.change_percent);
+    
+    changeElement.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
+    
+    // Update change class for styling
+    changeElement.className = `change ${change >= 0 ? 'positive' : 'negative'}`;
+    
+    // Update last updated time
+    const lastUpdatedElement = card.querySelector('.last-updated');
+    lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
 }
 
 // Auto-refresh every 30 seconds
