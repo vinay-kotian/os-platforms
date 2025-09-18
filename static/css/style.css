@@ -1,136 +1,259 @@
-/* Basic CSS for Flask App */
+/* Simple, Clean CSS for Stock Tracker */
+
+:root {
+    --primary-color: #2563eb;
+    --primary-hover: #1d4ed8;
+    --success-color: #16a34a;
+    --danger-color: #dc2626;
+    --warning-color: #d97706;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --white: #ffffff;
+    --border-radius: 8px;
+    --border-radius-lg: 12px;
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --transition: all 0.2s ease-in-out;
+}
+
+* {
+    box-sizing: border-box;
+}
 
 body {
-    font-family: Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     margin: 0;
     padding: 0;
     line-height: 1.6;
-    color: #333;
+    color: var(--gray-800);
+    background-color: var(--gray-50);
+    min-height: 100vh;
 }
 
+/* Header Styles */
 header {
-    background-color: #f4f4f4;
+    background-color: var(--white);
+    border-bottom: 1px solid var(--gray-200);
     padding: 1rem 0;
-    border-bottom: 1px solid #ddd;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
 }
 
 nav {
     max-width: 1200px;
     margin: 0 auto;
     padding: 0 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.nav-brand {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--gray-900);
+    text-decoration: none;
+}
+
+.nav-links {
+    display: flex;
+    gap: 2rem;
 }
 
 nav a {
     text-decoration: none;
-    color: #333;
-    margin-right: 1rem;
+    color: var(--gray-600);
+    font-weight: 500;
+    padding: 0.5rem 1rem;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
 }
 
 nav a:hover {
-    color: #007bff;
+    color: var(--primary-color);
+    background-color: var(--gray-100);
 }
 
+/* Main Content */
 main {
     max-width: 1200px;
     margin: 2rem auto;
     padding: 0 1rem;
 }
 
-footer {
-    background-color: #f4f4f4;
+/* Page Header */
+.page-header {
     text-align: center;
-    padding: 1rem 0;
-    border-top: 1px solid #ddd;
-    margin-top: 2rem;
+    margin-bottom: 3rem;
+    padding: 2rem 0;
+    background-color: var(--white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-sm);
 }
 
-h1 {
-    color: #333;
-    margin-bottom: 1rem;
+.page-header h1 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem 0;
+    color: var(--gray-900);
 }
 
-p {
-    margin-bottom: 1rem;
+.page-header p {
+    font-size: 1.1rem;
+    color: var(--gray-600);
+    margin: 0;
 }
 
-/* Prices page styles */
+/* Price Cards */
 .prices-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
     gap: 2rem;
     margin: 2rem 0;
 }
 
 .price-card {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    background-color: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    padding: 2rem;
+    box-shadow: var(--shadow-sm);
+    transition: var(--transition);
+}
+
+.price-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
 }
 
 .price-card h2 {
-    margin: 0 0 1rem 0;
-    color: #495057;
+    margin: 0 0 1.5rem 0;
+    color: var(--gray-800);
     font-size: 1.25rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
 }
 
 .price-info {
-    margin-bottom: 1rem;
+    margin-bottom: 1.5rem;
 }
 
 .current-price {
-    font-size: 2rem;
-    font-weight: bold;
-    color: #212529;
+    font-size: 2.25rem;
+    font-weight: 700;
+    color: var(--gray-900);
     margin-bottom: 0.5rem;
+    line-height: 1;
 }
 
 .change {
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 600;
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--border-radius);
+    display: inline-block;
 }
 
 .change.positive {
-    color: #28a745;
+    color: var(--success-color);
+    background-color: #dcfce7;
 }
 
 .change.negative {
-    color: #dc3545;
+    color: var(--danger-color);
+    background-color: #fef2f2;
 }
 
 .last-updated {
-    font-size: 0.9rem;
-    color: #6c757d;
+    font-size: 0.875rem;
+    color: var(--gray-500);
     font-style: italic;
 }
 
-.refresh-info {
-    margin-top: 2rem;
-    padding: 1rem;
-    background: #e9ecef;
-    border-radius: 4px;
+/* Refresh Section */
+.refresh-section {
     text-align: center;
+    margin: 3rem 0;
+    padding: 2rem;
+    background-color: var(--white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--gray-200);
 }
 
-.refresh-info p {
-    margin: 0;
-    color: #6c757d;
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: none;
+    border: 1px solid transparent;
+    border-radius: var(--border-radius);
+    cursor: pointer;
+    transition: var(--transition);
 }
 
-/* Login page styles */
+.btn-primary {
+    background-color: var(--primary-color);
+    color: var(--white);
+    border-color: var(--primary-color);
+}
+
+.btn-primary:hover {
+    background-color: var(--primary-hover);
+    border-color: var(--primary-hover);
+}
+
+.btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.btn-success {
+    background-color: var(--success-color);
+    color: var(--white);
+    border-color: var(--success-color);
+}
+
+.btn-success:hover {
+    background-color: #15803d;
+    border-color: #15803d;
+}
+
+.refresh-note {
+    margin-top: 1rem;
+    color: var(--gray-500);
+    font-size: 0.875rem;
+}
+
+/* Login Page Styles */
 .login-container {
-    max-width: 600px;
+    max-width: 500px;
     margin: 2rem auto;
 }
 
 .login-form {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
+    background-color: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
     padding: 2rem;
+    box-shadow: var(--shadow-sm);
     margin-bottom: 2rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .form-group {
@@ -141,154 +264,169 @@ p {
     display: block;
     margin-bottom: 0.5rem;
     font-weight: 600;
-    color: #495057;
+    color: var(--gray-700);
 }
 
 .form-control {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid #ced4da;
-    border-radius: 4px;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--border-radius);
     font-size: 1rem;
-    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+    transition: var(--transition);
+    background-color: var(--white);
 }
 
 .form-control:focus {
-    outline: 0;
-    border-color: #007bff;
-    box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
-}
-
-.btn {
-    display: inline-block;
-    padding: 0.75rem 1.5rem;
-    margin-bottom: 0;
-    font-size: 1rem;
-    font-weight: 400;
-    line-height: 1.5;
-    text-align: center;
-    text-decoration: none;
-    vertical-align: middle;
-    cursor: pointer;
-    border: 1px solid transparent;
-    border-radius: 4px;
-    transition: color 0.15s ease-in-out, background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
-}
-
-.btn-primary {
-    color: #fff;
-    background-color: #007bff;
-    border-color: #007bff;
-}
-
-.btn-primary:hover {
-    color: #fff;
-    background-color: #0056b3;
-    border-color: #004085;
-}
-
-.btn-success {
-    color: #fff;
-    background-color: #28a745;
-    border-color: #28a745;
-}
-
-.btn-success:hover {
-    color: #fff;
-    background-color: #1e7e34;
-    border-color: #1c7430;
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 
 .zerodha-login {
-    background: #e8f5e8;
-    border: 1px solid #c3e6c3;
-    border-radius: 8px;
-    padding: 1.5rem;
+    background-color: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    border-radius: var(--border-radius-lg);
+    padding: 2rem;
     text-align: center;
     margin-bottom: 2rem;
 }
 
 .zerodha-login h3 {
-    color: #155724;
+    color: var(--success-color);
     margin-top: 0;
+    font-weight: 600;
 }
 
 .zerodha-login .note {
-    font-size: 0.9rem;
-    color: #6c757d;
+    font-size: 0.875rem;
+    color: var(--gray-600);
     margin-top: 1rem;
 }
 
 .help-section {
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
-    padding: 1.5rem;
+    background-color: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
+    padding: 2rem;
     margin-top: 2rem;
+    box-shadow: var(--shadow-sm);
 }
 
 .help-section h3 {
-    color: #495057;
+    color: var(--gray-800);
     margin-top: 0;
+    font-weight: 600;
 }
 
 .help-section ol {
-    color: #6c757d;
+    color: var(--gray-600);
 }
 
 .help-section li {
     margin-bottom: 0.5rem;
 }
 
+/* Alert Styles */
 .alert {
-    padding: 0.75rem 1.25rem;
-    margin-bottom: 1rem;
+    padding: 1rem 1.5rem;
+    margin-bottom: 1.5rem;
+    border-radius: var(--border-radius);
+    font-weight: 500;
     border: 1px solid transparent;
-    border-radius: 4px;
 }
 
 .alert-success {
-    color: #155724;
-    background-color: #d4edda;
-    border-color: #c3e6cb;
+    color: #166534;
+    background-color: #f0fdf4;
+    border-color: #bbf7d0;
 }
 
 .alert-danger {
-    color: #721c24;
-    background-color: #f8d7da;
-    border-color: #f5c6cb;
+    color: #991b1b;
+    background-color: #fef2f2;
+    border-color: #fecaca;
 }
 
-/* Additional styles for live prices */
-.refresh-section {
-    text-align: center;
-    margin: 2rem 0;
-    padding: 1rem;
-    background: #f8f9fa;
-    border-radius: 8px;
-}
-
-.refresh-note {
-    margin-top: 0.5rem;
-    color: #6c757d;
-    font-size: 0.9rem;
-}
-
+/* No Data State */
 .no-data {
     text-align: center;
-    padding: 2rem;
-    background: #f8f9fa;
-    border: 1px solid #dee2e6;
-    border-radius: 8px;
+    padding: 3rem 2rem;
+    background-color: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius-lg);
     margin: 2rem 0;
+    box-shadow: var(--shadow-sm);
 }
 
 .no-data h3 {
-    color: #dc3545;
+    color: var(--danger-color);
     margin-bottom: 1rem;
+    font-weight: 600;
 }
 
 .no-data p {
-    color: #6c757d;
+    color: var(--gray-600);
     margin-bottom: 1.5rem;
+}
+
+/* Footer */
+footer {
+    background-color: var(--white);
+    text-align: center;
+    padding: 2rem 0;
+    border-top: 1px solid var(--gray-200);
+    margin-top: 4rem;
+    color: var(--gray-600);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .nav-links {
+        gap: 1rem;
+    }
+    
+    .page-header h1 {
+        font-size: 2rem;
+    }
+    
+    .prices-container {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+    }
+    
+    .price-card {
+        padding: 1.5rem;
+    }
+    
+    .current-price {
+        font-size: 2rem;
+    }
+    
+    .login-form {
+        padding: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    main {
+        padding: 0 0.5rem;
+    }
+    
+    .page-header h1 {
+        font-size: 1.75rem;
+    }
+    
+    .price-card {
+        padding: 1rem;
+    }
+    
+    .current-price {
+        font-size: 1.75rem;
+    }
+    
+    .btn {
+        padding: 0.75rem 1.25rem;
+        font-size: 0.9rem;
+    }
 }

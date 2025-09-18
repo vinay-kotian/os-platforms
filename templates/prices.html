@@ -3,8 +3,10 @@
 {% block title %}Stock Prices - Flask App{% endblock %}
 
 {% block content %}
-<h1>Stock Prices</h1>
-<p>Current Nifty and Bank Nifty prices</p>
+<div class="page-header">
+    <h1>Live Stock Prices</h1>
+    <p>Real-time Nifty and Bank Nifty market data</p>
+</div>
 
 <!-- Flash Messages -->
 {% with messages = get_flashed_messages(with_categories=true) %}

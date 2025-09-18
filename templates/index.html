@@ -1,10 +1,36 @@
 {% extends "base.html" %}
 
-{% block title %}Home - Flask App{% endblock %}
+{% block title %}Home - Stock Tracker{% endblock %}
 
 {% block content %}
-<h1>Welcome Jayant's Website</h1>
-<p>This is the home page of your Flask application.</p>
-<p><a href="{{ url_for('login') }}">Login to Zerodha</a></p>
-<p><a href="{{ url_for('prices') }}">View Nifty and Bank Nifty Prices</a></p>
+<div class="page-header">
+    <h1>Welcome to Stock Tracker</h1>
+    <p>Your gateway to real-time Nifty and Bank Nifty market data</p>
+</div>
+
+<div class="login-container">
+    <div class="login-form">
+        <h2 style="text-align: center; margin-bottom: 2rem; color: var(--gray-800);">Get Started</h2>
+        
+        <div style="display: grid; gap: 1.5rem;">
+            <a href="{{ url_for('login') }}" class="btn btn-primary" style="text-align: center; justify-content: center;">
+                Login to Zerodha
+            </a>
+            
+            <a href="{{ url_for('prices') }}" class="btn btn-success" style="text-align: center; justify-content: center;">
+                View Live Prices
+            </a>
+        </div>
+        
+        <div style="margin-top: 2rem; padding: 1.5rem; background-color: var(--gray-50); border-radius: var(--border-radius); border: 1px solid var(--gray-200);">
+            <h3 style="color: var(--gray-800); margin-top: 0; font-size: 1.1rem; font-weight: 600;">Features</h3>
+            <ul style="color: var(--gray-600); margin: 0; padding-left: 1.5rem;">
+                <li>Real-time Nifty 50 and Bank Nifty prices</li>
+                <li>Auto-refresh every 30 seconds</li>
+                <li>Persistent login sessions</li>
+                <li>Clean, responsive design</li>
+            </ul>
+        </div>
+    </div>
+</div>
 {% endblock %}
