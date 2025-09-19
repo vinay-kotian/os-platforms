@@ -123,9 +123,9 @@ function updatePriceCard(type, data) {
     lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
 }
 
-// Auto-refresh every 30 seconds
+// Auto-refresh every 1 second
 setInterval(function() {
     refreshPrices();
-}, 30000);
+}, 1000);
 </script>
 {% endblock %}
