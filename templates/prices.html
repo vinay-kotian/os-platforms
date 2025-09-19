@@ -3,10 +3,6 @@
 {% block title %}Stock Prices - Flask App{% endblock %}
 
 {% block content %}
-<div class="page-header">
-    <h1>Live Stock Prices</h1>
-    <p>Real-time Nifty and Bank Nifty market data</p>
-</div>
 
 <!-- Flash Messages -->
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -46,9 +42,89 @@
     </div>
 </div>
 
-<div class="refresh-section">
-    <button onclick="refreshPrices()" class="btn btn-primary">Refresh Prices</button>
-    <p class="refresh-note">Click to get the latest stock prices</p>
+
+<!-- Alerts Section -->
+<div class="alerts-section">
+    <div class="alerts-header">
+        <h2>Price Alerts</h2>
+        <p>Set up alerts to get notified when prices reach your target levels</p>
+    </div>
+    
+    <!-- Create New Alert Form -->
+    <div class="alert-form-row">
+        <form id="alertForm" class="alert-form-inline">
+            <div class="form-field">
+                <label for="alertSymbol">Symbol</label>
+                <select id="alertSymbol" name="symbol" class="form-control-sm" required>
+                    <option value="">Select</option>
+                    <option value="NIFTY 50">NIFTY 50</option>
+                    <option value="NIFTY BANK" selected>NIFTY BANK</option>
+                </select>
+            </div>
+            
+            <div class="form-field">
+                <label for="alertCondition">Condition</label>
+                <select id="alertCondition" name="condition" class="form-control-sm" required>
+                    <option value="">Select</option>
+                    <option value="above">Above</option>
+                    <option value="below">Below</option>
+                    <option value="change_up">% Up</option>
+                    <option value="change_down">% Down</option>
+                </select>
+            </div>
+            
+            <div class="form-field">
+                <label for="alertValue">Target</label>
+                <input type="number" id="alertValue" name="value" class="form-control-sm" 
+                       placeholder="Enter price" step="0.01" required>
+            </div>
+            
+            <div class="form-field">
+                <label for="alertName">Name</label>
+                <input type="text" id="alertName" name="name" class="form-control-sm" 
+                       placeholder="Alert name" required>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Create</button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="clearAlertForm()">Clear</button>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Active Alerts List -->
+    <div class="active-alerts-section">
+        <h3>Active Alerts</h3>
+        <div class="alerts-list">
+            <div class="alert-row">
+                <div class="alert-symbol">NIFTY 50</div>
+                <div class="alert-condition">Above ₹24,500</div>
+                <div class="alert-name">Nifty Breakout</div>
+                <div class="alert-status">
+                    <span class="status-badge active">Active</span>
+                </div>
+                <div class="alert-actions">
+                    <button class="btn btn-sm btn-danger" onclick="deleteAlert(1)">Delete</button>
+                </div>
+            </div>
+            
+            <div class="alert-row">
+                <div class="alert-symbol">NIFTY BANK</div>
+                <div class="alert-condition">Below ₹52,000</div>
+                <div class="alert-name">Bank Nifty Support</div>
+                <div class="alert-status">
+                    <span class="status-badge active">Active</span>
+                </div>
+                <div class="alert-actions">
+                    <button class="btn btn-sm btn-danger" onclick="deleteAlert(2)">Delete</button>
+                </div>
+            </div>
+            
+            <div class="no-alerts" style="display: none;">
+                <p>No active alerts. Create your first alert above.</p>
+            </div>
+        </div>
+    </div>
 </div>
 
 {% else %}
@@ -62,12 +138,17 @@
 
 {% block scripts %}
 <script>
-function refreshPrices() {
-    // Show loading state
-    const refreshBtn = document.querySelector('.btn-primary');
-    const originalText = refreshBtn.textContent;
-    refreshBtn.textContent = 'Refreshing...';
-    refreshBtn.disabled = true;
+function refreshPrices(showButtonState = false) {
+    // Show loading state only for manual refreshes
+    let refreshBtn = null;
+    let originalText = '';
+    
+    if (showButtonState) {
+        refreshBtn = document.querySelector('.btn-primary');
+        originalText = refreshBtn.textContent;
+        refreshBtn.textContent = 'Refreshing...';
+        refreshBtn.disabled = true;
+    }
     
     // Make AJAX call to fetch fresh data
     fetch('/stocks/fetch-price')
@@ -92,12 +173,16 @@ function refreshPrices() {
         })
         .catch(error => {
             console.error('Error refreshing prices:', error);
-            alert('Error refreshing prices: ' + error.message);
+            if (showButtonState) {
+                alert('Error refreshing prices: ' + error.message);
+            }
         })
         .finally(() => {
-            // Reset button state
-            refreshBtn.textContent = originalText;
-            refreshBtn.disabled = false;
+            // Reset button state only for manual refreshes
+            if (showButtonState && refreshBtn) {
+                refreshBtn.textContent = originalText;
+                refreshBtn.disabled = false;
+            }
         });
 }
 
@@ -123,9 +208,99 @@ function updatePriceCard(type, data) {
     lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
 }
 
-// Auto-refresh every 1 second
+// Auto-refresh every 1 second (silent)
 setInterval(function() {
-    refreshPrices();
+    refreshPrices(false);
 }, 1000);
+
+// Smart alert form functionality
+document.getElementById('alertCondition').addEventListener('change', function() {
+    updateTargetField();
+});
+
+function updateTargetField() {
+    const condition = document.getElementById('alertCondition').value;
+    const targetField = document.getElementById('alertValue');
+    const targetLabel = targetField.previousElementSibling;
+    
+    switch(condition) {
+        case 'above':
+            targetField.placeholder = 'Enter target price (e.g., 24500)';
+            targetField.step = '0.01';
+            targetLabel.textContent = 'Target Price';
+            break;
+        case 'below':
+            targetField.placeholder = 'Enter target price (e.g., 24500)';
+            targetField.step = '0.01';
+            targetLabel.textContent = 'Target Price';
+            break;
+        case 'change_up':
+            targetField.placeholder = 'Enter percentage (e.g., 2.5)';
+            targetField.step = '0.1';
+            targetLabel.textContent = 'Percentage';
+            break;
+        case 'change_down':
+            targetField.placeholder = 'Enter percentage (e.g., 2.5)';
+            targetField.step = '0.1';
+            targetLabel.textContent = 'Percentage';
+            break;
+        default:
+            targetField.placeholder = 'Enter value';
+            targetField.step = '0.01';
+            targetLabel.textContent = 'Target';
+    }
+}
+
+// Alert functionality
+document.getElementById('alertForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const condition = formData.get('condition');
+    const value = parseFloat(formData.get('value'));
+    
+    // Smart validation based on condition
+    if (condition === 'change_up' || condition === 'change_down') {
+        if (value < 0 || value > 100) {
+            alert('Percentage should be between 0 and 100');
+            return;
+        }
+    } else if (condition === 'above' || condition === 'below') {
+        if (value < 0) {
+            alert('Price should be a positive number');
+            return;
+        }
+    }
+    
+    const alertData = {
+        symbol: formData.get('symbol'),
+        condition: condition,
+        value: value,
+        name: formData.get('name')
+    };
+    
+    // For now, just show a success message (backend not implemented)
+    alert('Alert created successfully! (Backend not implemented yet)');
+    clearAlertForm();
+});
+
+function clearAlertForm() {
+    document.getElementById('alertForm').reset();
+    // Reset to default state
+    document.getElementById('alertSymbol').value = 'NIFTY BANK';
+    updateTargetField();
+}
+
+function deleteAlert(alertId) {
+    if (confirm('Are you sure you want to delete this alert?')) {
+        // For now, just show a success message (backend not implemented)
+        alert('Alert deleted successfully! (Backend not implemented yet)');
+    }
+}
+
+// Initialize the form on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateTargetField();
+});
 </script>
 {% endblock %}

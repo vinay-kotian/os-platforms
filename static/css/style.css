@@ -183,16 +183,6 @@ main {
     font-style: italic;
 }
 
-/* Refresh Section */
-.refresh-section {
-    text-align: center;
-    margin: 3rem 0;
-    padding: 2rem;
-    background-color: var(--white);
-    border-radius: var(--border-radius-lg);
-    box-shadow: var(--shadow-sm);
-    border: 1px solid var(--gray-200);
-}
 
 .btn {
     display: inline-flex;
@@ -235,11 +225,6 @@ main {
     border-color: #15803d;
 }
 
-.refresh-note {
-    margin-top: 1rem;
-    color: var(--gray-500);
-    font-size: 0.875rem;
-}
 
 /* Login Page Styles */
 .login-container {
@@ -380,6 +365,186 @@ footer {
     color: var(--gray-600);
 }
 
+/* Alerts Section */
+.alerts-section {
+    margin: 3rem 0;
+    background-color: var(--white);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--gray-200);
+    overflow: hidden;
+}
+
+.alerts-header {
+    padding: 1.5rem 2rem 1rem 2rem;
+    border-bottom: 1px solid var(--gray-200);
+    background-color: var(--gray-50);
+}
+
+.alerts-header h2 {
+    margin: 0 0 0.5rem 0;
+    color: var(--gray-900);
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.alerts-header p {
+    margin: 0;
+    color: var(--gray-600);
+    font-size: 1rem;
+}
+
+/* Inline Alert Form */
+.alert-form-row {
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--gray-200);
+    background-color: var(--white);
+}
+
+.alert-form-inline {
+    display: flex;
+    align-items: end;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.form-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 120px;
+}
+
+.form-field label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--gray-700);
+    margin-bottom: 0.25rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.form-control-sm {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--gray-300);
+    border-radius: var(--border-radius);
+    font-size: 0.875rem;
+    transition: var(--transition);
+    background-color: var(--white);
+}
+
+.form-control-sm:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.btn-sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.btn-secondary {
+    background-color: var(--gray-200);
+    color: var(--gray-700);
+    border-color: var(--gray-200);
+}
+
+.btn-secondary:hover {
+    background-color: var(--gray-300);
+    border-color: var(--gray-300);
+}
+
+/* Active Alerts Section */
+.active-alerts-section {
+    padding: 1.5rem 2rem;
+    background-color: var(--gray-50);
+}
+
+.active-alerts-section h3 {
+    margin: 0 0 1rem 0;
+    color: var(--gray-800);
+    font-size: 1.125rem;
+    font-weight: 600;
+}
+
+.alerts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.alert-row {
+    display: grid;
+    grid-template-columns: 1fr 1.5fr 1fr auto auto;
+    gap: 1rem;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background-color: var(--white);
+    border: 1px solid var(--gray-200);
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+}
+
+.alert-row:hover {
+    box-shadow: var(--shadow-sm);
+    border-color: var(--gray-300);
+}
+
+.alert-symbol {
+    font-weight: 600;
+    color: var(--gray-900);
+    font-size: 0.875rem;
+}
+
+.alert-condition {
+    color: var(--gray-700);
+    font-size: 0.875rem;
+}
+
+.alert-name {
+    color: var(--gray-600);
+    font-size: 0.875rem;
+    font-style: italic;
+}
+
+.alert-status {
+    display: flex;
+    justify-content: center;
+}
+
+.status-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.status-badge.active {
+    background-color: #dcfce7;
+    color: var(--success-color);
+}
+
+.alert-actions {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.no-alerts {
+    text-align: center;
+    padding: 2rem;
+    color: var(--gray-500);
+    font-style: italic;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .nav-links {
@@ -405,6 +570,33 @@ footer {
     
     .login-form {
         padding: 1.5rem;
+    }
+    
+    .alert-form-inline {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1rem;
+    }
+    
+    .form-field {
+        min-width: auto;
+    }
+    
+    .form-actions {
+        margin-left: 0;
+        justify-content: center;
+    }
+    
+    .alert-row {
+        grid-template-columns: 1fr;
+        gap: 0.5rem;
+        text-align: center;
+    }
+    
+    .alert-symbol,
+    .alert-condition,
+    .alert-name {
+        font-size: 0.8rem;
     }
 }
 
