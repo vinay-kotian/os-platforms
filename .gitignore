@@ -209,3 +209,7 @@ __marimo__/
 
 # Session data (contains sensitive API credentials)
 session_data.json
+
+# Database files
+app.db
+*.db

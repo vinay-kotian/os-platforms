@@ -1,5 +1,8 @@
 import os
 import json
+import requests
+import sqlite3
+from datetime import datetime
 from flask import Flask, redirect, request, session, url_for, render_template, flash
 from flask.json import jsonify
 from kiteconnect import KiteConnect
@@ -13,10 +16,164 @@ app.secret_key = "thisisasecretkey"   # needed for session handling
 # File to store persistent session data
 SESSION_FILE = 'session_data.json'
 
+# Database file
+DATABASE_FILE = 'app.db'
+
 # Global variables to store user's API credentials
 user_api_key = None
 user_api_secret = None
 kite = None
+
+def init_database():
+    """Initialize the SQLite database and create tables"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Create alerts table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS alerts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                lhs_exchange TEXT NOT NULL,
+                lhs_tradingsymbol TEXT NOT NULL,
+                lhs_attribute TEXT NOT NULL,
+                operator TEXT NOT NULL,
+                rhs_type TEXT NOT NULL,
+                rhs_constant REAL,
+                rhs_exchange TEXT,
+                rhs_tradingsymbol TEXT,
+                rhs_attribute TEXT,
+                type TEXT NOT NULL,
+                status TEXT NOT NULL,
+                alert_count INTEGER DEFAULT 0,
+                disabled_reason TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                stored_at TEXT NOT NULL,
+                kite_response TEXT NOT NULL
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print("Database initialized successfully")
+        
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+
+def store_alert_response(alert_data, kite_response):
+    """Store alert response in database"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Extract data from KITE response - handle different response structures
+        response_data = {}
+        if 'response' in kite_response and 'data' in kite_response['response']:
+            # Structure: {"response": {"data": {...}}}
+            response_data = kite_response['response']['data']
+        elif 'data' in kite_response:
+            # Structure: {"data": {...}}
+            response_data = kite_response['data']
+        else:
+            # Fallback: use the entire response
+            response_data = kite_response
+        
+        print(f"Debug - KITE response structure: {kite_response}")
+        print(f"Debug - Extracted response_data: {response_data}")
+        
+        # Validate that we have required data
+        if not response_data or not response_data.get('uuid'):
+            print("Error: No valid response data or UUID found")
+            return False
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO alerts (
+                uuid, name, user_id, lhs_exchange, lhs_tradingsymbol, lhs_attribute,
+                operator, rhs_type, rhs_constant, rhs_exchange, rhs_tradingsymbol,
+                rhs_attribute, type, status, alert_count, disabled_reason,
+                created_at, updated_at, stored_at, kite_response
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            response_data.get('uuid'),
+            response_data.get('name'),
+            response_data.get('user_id'),
+            response_data.get('lhs_exchange'),
+            response_data.get('lhs_tradingsymbol'),
+            response_data.get('lhs_attribute'),
+            response_data.get('operator'),
+            response_data.get('rhs_type'),
+            response_data.get('rhs_constant'),
+            response_data.get('rhs_exchange'),
+            response_data.get('rhs_tradingsymbol'),
+            response_data.get('rhs_attribute'),
+            response_data.get('type'),
+            response_data.get('status'),
+            response_data.get('alert_count'),
+            response_data.get('disabled_reason'),
+            response_data.get('created_at'),
+            response_data.get('updated_at'),
+            datetime.now().isoformat(),
+            json.dumps(kite_response)
+        ))
+        
+        conn.commit()
+        conn.close()
+        print(f"Alert stored in database: {response_data.get('uuid')}")
+        return True
+        
+    except Exception as e:
+        print(f"Error storing alert in database: {e}")
+        return False
+
+def get_stored_alerts():
+    """Retrieve all stored alerts from database"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT uuid, name, user_id, lhs_exchange, lhs_tradingsymbol, lhs_attribute,
+                   operator, rhs_type, rhs_constant, rhs_exchange, rhs_tradingsymbol,
+                   rhs_attribute, type, status, alert_count, disabled_reason,
+                   created_at, updated_at, stored_at
+            FROM alerts
+            ORDER BY stored_at DESC
+        ''')
+        
+        alerts = []
+        for row in cursor.fetchall():
+            alerts.append({
+                'uuid': row[0],
+                'name': row[1],
+                'user_id': row[2],
+                'lhs_exchange': row[3],
+                'lhs_tradingsymbol': row[4],
+                'lhs_attribute': row[5],
+                'operator': row[6],
+                'rhs_type': row[7],
+                'rhs_constant': row[8],
+                'rhs_exchange': row[9],
+                'rhs_tradingsymbol': row[10],
+                'rhs_attribute': row[11],
+                'type': row[12],
+                'status': row[13],
+                'alert_count': row[14],
+                'disabled_reason': row[15],
+                'created_at': row[16],
+                'updated_at': row[17],
+                'stored_at': row[18]
+            })
+        
+        conn.close()
+        return alerts
+        
+    except Exception as e:
+        print(f"Error retrieving alerts from database: {e}")
+        return []
 
 def load_session_data():
     """Load session data from file"""
@@ -39,6 +196,21 @@ def load_session_data():
             print(f"Error loading session: {e}")
     return False
 
+def sync_session_from_file():
+    """Sync Flask session with file-based session data"""
+    if os.path.exists(SESSION_FILE):
+        try:
+            with open(SESSION_FILE, 'r') as f:
+                data = json.load(f)
+                session['api_key'] = data.get('api_key')
+                session['api_secret'] = data.get('api_secret')
+                session['access_token'] = data.get('access_token')
+                print("Synced session from file")
+                return True
+        except Exception as e:
+            print(f"Error syncing session: {e}")
+    return False
+
 def save_session_data():
     """Save session data to file"""
     try:
@@ -53,8 +225,15 @@ def save_session_data():
     except Exception as e:
         print(f"Error saving session: {e}")
 
-# Load existing session on startup
+# Initialize database and load existing session on startup
+init_database()
 load_session_data()
+
+@app.before_request
+def before_request():
+    """Sync session from file before each request"""
+    if not session.get('access_token') and os.path.exists(SESSION_FILE):
+        sync_session_from_file()
 
 @app.route('/')
 def index():
@@ -213,6 +392,231 @@ def fetch_prices():
         
     except Exception as e:
         return jsonify({'error': f'Error fetching stock prices: {str(e)}'}), 500
+
+def send_alert_to_kite(alert_data):
+    """Send alert to KITE API"""
+    try:
+        # Get API credentials from session
+        api_key = session.get('api_key')
+        access_token = session.get('access_token')
+        
+        if not api_key or not access_token:
+            return {'error': 'Authentication required', 'success': False}
+        
+        # Prepare headers
+        headers = {
+            'X-Kite-Version': '3',
+            'Authorization': f'token {api_key}:{access_token}'
+        }
+        
+        # Send POST request to KITE alerts API
+        response = requests.post(
+            'https://api.kite.trade/alerts',
+            headers=headers,
+            data=alert_data
+        )
+        
+        if response.status_code == 200:
+            kite_response = response.json()
+            # Store the alert response in database
+            store_alert_response(alert_data, kite_response)
+            return {'message': 'Alert created successfully', 'success': True, 'response': kite_response}
+        else:
+            return {'error': f'Failed to create alert: {response.text}', 'success': False}
+            
+    except Exception as e:
+        return {'error': f'Error sending alert to KITE: {str(e)}', 'success': False}
+
+@app.route('/alerts/create', methods=['POST'])
+def create_alert():
+    """API endpoint to create alerts and send to KITE API"""
+    global kite
+    
+    # Debug session info
+    print(f"Session data: api_key={session.get('api_key')}, access_token={'***' if session.get('access_token') else None}")
+    print(f"Global kite object: {kite is not None}")
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({
+            'error': 'Not authenticated', 
+            'debug': {
+                'has_access_token': bool(session.get('access_token')),
+                'has_kite': kite is not None,
+                'session_keys': list(session.keys())
+            }
+        }), 401
+    
+    try:
+        # Get alert data from request
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({'error': 'No data provided'}), 400
+        
+        # Validate required fields
+        required_fields = ['name', 'lhs_exchange', 'lhs_tradingsymbol', 'lhs_attribute', 'operator', 'rhs_type', 'type']
+        missing_fields = [field for field in required_fields if field not in data]
+        
+        if missing_fields:
+            return jsonify({'error': f'Missing required fields: {", ".join(missing_fields)}'}), 400
+        
+        # Validate operator
+        valid_operators = ['>=', '<=', '>', '<', '==', '!=']
+        if data.get('operator') not in valid_operators:
+            return jsonify({'error': f'Invalid operator. Must be one of: {", ".join(valid_operators)}'}), 400
+        
+        # Validate rhs_type
+        valid_rhs_types = ['constant', 'variable']
+        if data.get('rhs_type') not in valid_rhs_types:
+            return jsonify({'error': f'Invalid rhs_type. Must be one of: {", ".join(valid_rhs_types)}'}), 400
+        
+        # If rhs_type is constant, validate rhs_constant
+        if data.get('rhs_type') == 'constant' and 'rhs_constant' not in data:
+            return jsonify({'error': 'rhs_constant is required when rhs_type is constant'}), 400
+        
+        # If rhs_type is variable, validate rhs_variable fields
+        if data.get('rhs_type') == 'variable':
+            variable_fields = ['rhs_exchange', 'rhs_tradingsymbol', 'rhs_attribute']
+            missing_variable_fields = [field for field in variable_fields if field not in data]
+            if missing_variable_fields:
+                return jsonify({'error': f'Missing required fields for variable rhs_type: {", ".join(missing_variable_fields)}'}), 400
+        
+        # Send alert to KITE API
+        result = send_alert_to_kite(data)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error creating alert: {str(e)}'}), 500
+
+@app.route('/alerts', methods=['GET'])
+def get_alerts():
+    """API endpoint to get all alerts from KITE API"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        # Get API credentials from session
+        api_key = session.get('api_key')
+        access_token = session.get('access_token')
+        
+        # Prepare headers
+        headers = {
+            'X-Kite-Version': '3',
+            'Authorization': f'token {api_key}:{access_token}'
+        }
+        
+        # Send GET request to KITE alerts API
+        response = requests.get(
+            'https://api.kite.trade/alerts',
+            headers=headers
+        )
+        
+        if response.status_code == 200:
+            return jsonify({'alerts': response.json(), 'success': True}), 200
+        else:
+            return jsonify({'error': f'Failed to fetch alerts: {response.text}', 'success': False}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error fetching alerts: {str(e)}'}), 500
+
+@app.route('/alerts/stored', methods=['GET'])
+def get_stored_alerts_endpoint():
+    """API endpoint to get all stored alerts from database"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        alerts = get_stored_alerts()
+        return jsonify({
+            'alerts': alerts,
+            'count': len(alerts),
+            'success': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error retrieving stored alerts: {str(e)}'}), 500
+
+@app.route('/alerts/stored/<uuid>', methods=['GET'])
+def get_stored_alert_by_uuid(uuid):
+    """API endpoint to get a specific stored alert by UUID"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT uuid, name, user_id, lhs_exchange, lhs_tradingsymbol, lhs_attribute,
+                   operator, rhs_type, rhs_constant, rhs_exchange, rhs_tradingsymbol,
+                   rhs_attribute, type, status, alert_count, disabled_reason,
+                   created_at, updated_at, stored_at, kite_response
+            FROM alerts
+            WHERE uuid = ?
+        ''', (uuid,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            alert = {
+                'uuid': row[0],
+                'name': row[1],
+                'user_id': row[2],
+                'lhs_exchange': row[3],
+                'lhs_tradingsymbol': row[4],
+                'lhs_attribute': row[5],
+                'operator': row[6],
+                'rhs_type': row[7],
+                'rhs_constant': row[8],
+                'rhs_exchange': row[9],
+                'rhs_tradingsymbol': row[10],
+                'rhs_attribute': row[11],
+                'type': row[12],
+                'status': row[13],
+                'alert_count': row[14],
+                'disabled_reason': row[15],
+                'created_at': row[16],
+                'updated_at': row[17],
+                'stored_at': row[18],
+                'kite_response': json.loads(row[19])
+            }
+            return jsonify({'alert': alert, 'success': True}), 200
+        else:
+            return jsonify({'error': 'Alert not found'}), 404
+            
+    except Exception as e:
+        return jsonify({'error': f'Error retrieving alert: {str(e)}'}), 500
+
+@app.route('/session/status')
+def session_status():
+    """Debug endpoint to check session status"""
+    return jsonify({
+        'session_data': {
+            'api_key': session.get('api_key'),
+            'access_token': '***' if session.get('access_token') else None,
+            'session_keys': list(session.keys())
+        },
+        'global_data': {
+            'user_api_key': user_api_key,
+            'kite_initialized': kite is not None
+        },
+        'file_exists': os.path.exists(SESSION_FILE)
+    })
 
 @app.route('/logout')
 def logout():
