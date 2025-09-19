@@ -602,6 +602,63 @@ def get_stored_alert_by_uuid(uuid):
     except Exception as e:
         return jsonify({'error': f'Error retrieving alert: {str(e)}'}), 500
 
+@app.route('/alerts/delete/<uuid>', methods=['DELETE'])
+def delete_alert(uuid):
+    """API endpoint to delete an alert by UUID"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        # Get API credentials from session
+        api_key = session.get('api_key')
+        access_token = session.get('access_token')
+        
+        # Prepare headers
+        headers = {
+            'X-Kite-Version': '3',
+            'Authorization': f'token {api_key}:{access_token}'
+        }
+        
+        # Send DELETE request to KITE alerts API
+        response = requests.delete(
+            f'https://api.kite.trade/alerts/{uuid}',
+            headers=headers
+        )
+        
+        if response.status_code == 200:
+            # Also delete from local database
+            delete_alert_from_database(uuid)
+            return jsonify({'message': 'Alert deleted successfully', 'success': True}), 200
+        else:
+            return jsonify({'error': f'Failed to delete alert: {response.text}', 'success': False}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error deleting alert: {str(e)}'}), 500
+
+def delete_alert_from_database(uuid):
+    """Delete alert from local database"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM alerts WHERE uuid = ?', (uuid,))
+        
+        if cursor.rowcount > 0:
+            conn.commit()
+            print(f"Alert deleted from database: {uuid}")
+        else:
+            print(f"Alert not found in database: {uuid}")
+        
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"Error deleting alert from database: {e}")
+        return False
+
 @app.route('/session/status')
 def session_status():
     """Debug endpoint to check session status"""
