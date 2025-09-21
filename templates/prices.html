@@ -8,131 +8,249 @@
 {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
         {% for category, message in messages %}
-            <div class="alert alert-{{ 'danger' if category == 'error' else category }}">
-                {{ message }}
+            <div class="alert {% if category == 'error' %}alert-error{% else %}alert-success{% endif %} mb-6">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    {% if category == 'error' %}
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    {% else %}
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    {% endif %}
+                </svg>
+                <span>{{ message }}</span>
             </div>
         {% endfor %}
     {% endif %}
 {% endwith %}
 
 {% if prices %}
-<div class="prices-container">
-    <div class="price-card">
-        <h2>{{ prices.nifty.name }}</h2>
-        <div class="price-info">
-            <div class="current-price">₹{{ "%.2f"|format(prices.nifty.current_price) }}</div>
-            <div class="change {% if prices.nifty.change >= 0 %}positive{% else %}negative{% endif %}">
-                {% if prices.nifty.change >= 0 %}+{% endif %}{{ "%.2f"|format(prices.nifty.change) }} 
-                ({% if prices.nifty.change_percent >= 0 %}+{% endif %}{{ "%.2f"|format(prices.nifty.change_percent) }}%)
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+    <div class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow">
+        <div class="card-body">
+            <div class="mb-4">
+                <h2 class="card-title text-xl">{{ prices.nifty.name }}</h2>
             </div>
+            <div class="mb-4">
+                <div class="text-4xl font-bold text-primary mb-2">₹{{ "%.2f"|format(prices.nifty.current_price) }}</div>
+                <div class="badge badge-lg {% if prices.nifty.change >= 0 %}badge-success{% else %}badge-error{% endif %}">
+                    {% if prices.nifty.change >= 0 %}+{% endif %}{{ "%.2f"|format(prices.nifty.change) }} 
+                    ({% if prices.nifty.change_percent >= 0 %}+{% endif %}{{ "%.2f"|format(prices.nifty.change_percent) }}%)
+                </div>
+            </div>
+            <div class="text-sm text-base-content/60 italic">Last updated: {{ prices.nifty.last_updated }}</div>
         </div>
-        <div class="last-updated">Last updated: {{ prices.nifty.last_updated }}</div>
     </div>
 
-    <div class="price-card">
-        <h2>{{ prices.bank_nifty.name }}</h2>
-        <div class="price-info">
-            <div class="current-price">₹{{ "%.2f"|format(prices.bank_nifty.current_price) }}</div>
-            <div class="change {% if prices.bank_nifty.change >= 0 %}positive{% else %}negative{% endif %}">
-                {% if prices.bank_nifty.change >= 0 %}+{% endif %}{{ "%.2f"|format(prices.bank_nifty.change) }} 
-                ({% if prices.bank_nifty.change_percent >= 0 %}+{% endif %}{{ "%.2f"|format(prices.bank_nifty.change_percent) }}%)
+    <div class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow">
+        <div class="card-body">
+            <div class="mb-4">
+                <h2 class="card-title text-xl">{{ prices.bank_nifty.name }}</h2>
             </div>
+            <div class="mb-4">
+                <div class="text-4xl font-bold text-success mb-2">₹{{ "%.2f"|format(prices.bank_nifty.current_price) }}</div>
+                <div class="badge badge-lg {% if prices.bank_nifty.change >= 0 %}badge-success{% else %}badge-error{% endif %}">
+                    {% if prices.bank_nifty.change >= 0 %}+{% endif %}{{ "%.2f"|format(prices.bank_nifty.change) }} 
+                    ({% if prices.bank_nifty.change_percent >= 0 %}+{% endif %}{{ "%.2f"|format(prices.bank_nifty.change_percent) }}%)
+                </div>
+            </div>
+            <div class="text-sm text-base-content/60 italic">Last updated: {{ prices.bank_nifty.last_updated }}</div>
         </div>
-        <div class="last-updated">Last updated: {{ prices.bank_nifty.last_updated }}</div>
     </div>
 </div>
 
+<!-- Sleek Refresh Control - Top Right Corner -->
+<div class="fixed top-20 right-4 z-40">
+    <div class="dropdown dropdown-end">
+        <div tabindex="0" role="button" class="btn btn-ghost btn-sm bg-base-100/90 backdrop-blur-sm shadow-lg border border-base-300">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+            </svg>
+            <span class="text-xs" id="refreshStatusCompact">5s</span>
+        </div>
+        <ul tabindex="0" class="dropdown-content menu p-2 shadow-xl bg-base-100 rounded-box w-48 border border-base-300">
+            <li class="menu-title">
+                <span>Refresh Rate</span>
+            </li>
+            <li><a data-rate="1000" class="refresh-option">1 second</a></li>
+            <li><a data-rate="2000" class="refresh-option">2 seconds</a></li>
+            <li><a data-rate="5000" class="refresh-option active">5 seconds</a></li>
+            <li><a data-rate="10000" class="refresh-option">10 seconds</a></li>
+            <li><a data-rate="30000" class="refresh-option">30 seconds</a></li>
+            <li><a data-rate="60000" class="refresh-option">1 minute</a></li>
+            <li><a data-rate="0" class="refresh-option">Manual only</a></li>
+            <div class="divider my-1"></div>
+            <li>
+                <button id="manualRefresh" class="btn btn-primary btn-sm w-full">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Refresh Now
+                </button>
+            </li>
+        </ul>
+    </div>
+</div>
 
 <!-- Alerts Section -->
-<div class="alerts-section">
-    <div class="alerts-header">
-        <h2>Price Alerts</h2>
-        <p>Set up alerts to get notified when prices reach your target levels</p>
-    </div>
+<div class="card bg-base-100 shadow-xl">
+    <div class="card-body">
+        <h2 class="card-title text-2xl mb-2">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-5 5v-5zM4.828 7l2.586 2.586a2 2 0 002.828 0L12 7H4.828zM4.828 17l2.586-2.586a2 2 0 012.828 0L12 17H4.828z"></path>
+            </svg>
+            Price Alerts
+        </h2>
+        <p class="text-base-content/70 mb-6">Set up alerts to get notified when prices reach your target levels</p>
+        
+        <!-- Create New Alert Form -->
+        <div class="bg-base-200 rounded-lg p-6 mb-6">
+            <form id="alertForm" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div class="form-control">
+                    <label class="label" for="alertSymbol">
+                        <span class="label-text font-semibold">Symbol</span>
+                    </label>
+                    <select id="alertSymbol" name="symbol" class="select select-bordered" required>
+                        <option value="">Select</option>
+                        <option value="NIFTY 50">NIFTY 50</option>
+                        <option value="NIFTY BANK" selected>NIFTY BANK</option>
+                    </select>
+                </div>
+                
+                <div class="form-control">
+                    <label class="label" for="alertCondition">
+                        <span class="label-text font-semibold">Condition</span>
+                    </label>
+                    <select id="alertCondition" name="condition" class="select select-bordered" required>
+                        <option value="">Select</option>
+                        <option value="above">Above</option>
+                        <option value="below">Below</option>
+                        <option value="change_up">% Up</option>
+                        <option value="change_down">% Down</option>
+                    </select>
+                </div>
+                
+                <div class="form-control">
+                    <label class="label" for="alertValue">
+                        <span class="label-text font-semibold">Target</span>
+                    </label>
+                    <input type="text" id="alertValue" name="value" class="input input-bordered no-scrollbar" 
+                           placeholder="Enter price" required>
+                    <label class="label">
+                        <span class="label-text-alt current-price-hint" id="currentPriceHint" style="display: none;"></span>
+                    </label>
+                </div>
+                
+                <div class="form-control">
+                    <label class="label" for="alertName">
+                        <span class="label-text font-semibold">Name</span>
+                    </label>
+                    <input type="text" id="alertName" name="name" class="input input-bordered" 
+                           placeholder="Alert name" required>
+                </div>
+                
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text font-semibold">Actions</span>
+                    </label>
+                    <div class="flex gap-2">
+                        <button type="submit" class="btn btn-primary flex-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                            </svg>
+                            Create
+                        </button>
+                        <button type="button" class="btn btn-outline flex-1" onclick="clearAlertForm()">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                            Clear
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
     
-    <!-- Create New Alert Form -->
-    <div class="alert-form-row">
-        <form id="alertForm" class="alert-form-inline">
-            <div class="form-field">
-                <label for="alertSymbol">Symbol</label>
-                <select id="alertSymbol" name="symbol" class="form-control-sm" required>
-                    <option value="">Select</option>
-                    <option value="NIFTY 50">NIFTY 50</option>
-                    <option value="NIFTY BANK" selected>NIFTY BANK</option>
-                </select>
-            </div>
-            
-            <div class="form-field">
-                <label for="alertCondition">Condition</label>
-                <select id="alertCondition" name="condition" class="form-control-sm" required>
-                    <option value="">Select</option>
-                    <option value="above">Above</option>
-                    <option value="below">Below</option>
-                    <option value="change_up">% Up</option>
-                    <option value="change_down">% Down</option>
-                </select>
-            </div>
-            
-            <div class="form-field">
-                <label for="alertValue">Target</label>
-                <input type="number" id="alertValue" name="value" class="form-control-sm" 
-                       placeholder="Enter price" step="0.01" required>
-                <small class="current-price-hint" id="currentPriceHint" style="display: none; color: #666; font-size: 0.8em;"></small>
-            </div>
-            
-            <div class="form-field">
-                <label for="alertName">Name</label>
-                <input type="text" id="alertName" name="name" class="form-control-sm" 
-                       placeholder="Alert name" required>
-            </div>
-            
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary btn-sm">Create</button>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="clearAlertForm()">Clear</button>
-            </div>
-        </form>
-    </div>
-    
-    <!-- Active Alerts List -->
-    <div class="active-alerts-section">
-        <h3>Active Alerts</h3>
-        <div class="alerts-list">
-            <div class="alert-row">
-                <div class="alert-symbol">NIFTY 50</div>
-                <div class="alert-condition">Above ₹24,500</div>
-                <div class="alert-name">Nifty Breakout</div>
-                <div class="alert-status">
-                    <span class="status-badge active">Active</span>
+        <!-- Active Alerts List -->
+        <div class="bg-base-200 rounded-lg p-6">
+            <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                </svg>
+                Active Alerts
+            </h3>
+            <div class="space-y-3">
+                <div class="card bg-base-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
+                            <div class="font-semibold text-sm">
+                                <div class="badge badge-primary badge-sm">NIFTY 50</div>
+                            </div>
+                            <div class="text-sm">Above ₹24,500</div>
+                            <div class="text-sm italic text-base-content/70">Nifty Breakout</div>
+                            <div class="flex justify-center">
+                                <div class="badge badge-success">Active</div>
+                            </div>
+                            <div class="flex justify-end">
+                                <button class="btn btn-error btn-sm" onclick="deleteAlert(1)">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                <div class="alert-actions">
-                    <button class="btn btn-sm btn-danger" onclick="deleteAlert(1)">Delete</button>
+                
+                <div class="card bg-base-100 shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
+                            <div class="font-semibold text-sm">
+                                <div class="badge badge-success badge-sm">NIFTY BANK</div>
+                            </div>
+                            <div class="text-sm">Below ₹52,000</div>
+                            <div class="text-sm italic text-base-content/70">Bank Nifty Support</div>
+                            <div class="flex justify-center">
+                                <div class="badge badge-success">Active</div>
+                            </div>
+                            <div class="flex justify-end">
+                                <button class="btn btn-error btn-sm" onclick="deleteAlert(2)">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                    </svg>
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            
-            <div class="alert-row">
-                <div class="alert-symbol">NIFTY BANK</div>
-                <div class="alert-condition">Below ₹52,000</div>
-                <div class="alert-name">Bank Nifty Support</div>
-                <div class="alert-status">
-                    <span class="status-badge active">Active</span>
+                
+                <div class="no-alerts text-center py-8 text-base-content/50 italic" style="display: none;">
+                    <div class="flex flex-col items-center gap-2">
+                        <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                        </svg>
+                        <p>No active alerts. Create your first alert above.</p>
+                    </div>
                 </div>
-                <div class="alert-actions">
-                    <button class="btn btn-sm btn-danger" onclick="deleteAlert(2)">Delete</button>
-                </div>
-            </div>
-            
-            <div class="no-alerts" style="display: none;">
-                <p>No active alerts. Create your first alert above.</p>
             </div>
         </div>
     </div>
 </div>
 
 {% else %}
-<div class="no-data">
-    <h3>Unable to fetch stock prices</h3>
-    <p>Please make sure you are logged in and try again.</p>
-    <a href="{{ url_for('login') }}" class="btn btn-primary">Login to Zerodha</a>
+<div class="hero bg-base-100 rounded-2xl shadow-xl">
+    <div class="hero-content text-center">
+        <div class="max-w-md">
+            <h1 class="text-3xl font-bold text-error mb-4">Unable to fetch stock prices</h1>
+            <p class="text-base-content/70 mb-6">Please make sure you are logged in and try again.</p>
+            <a href="{{ url_for('login') }}" class="btn btn-primary btn-lg">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                </svg>
+                Login to Zerodha
+            </a>
+        </div>
+    </div>
 </div>
 {% endif %}
 {% endblock %}
@@ -188,31 +306,82 @@ function refreshPrices(showButtonState = false) {
 }
 
 function updatePriceCard(type, data) {
-    const card = document.querySelector(`.price-card:nth-child(${type === 'nifty' ? '1' : '2'})`);
+    const card = document.querySelector(`.grid > div:nth-child(${type === 'nifty' ? '1' : '2'})`);
     
     // Update price
-    const priceElement = card.querySelector('.current-price');
+    const priceElement = card.querySelector('.text-4xl');
     priceElement.textContent = `₹${parseFloat(data.current_price).toFixed(2)}`;
     
     // Update change
-    const changeElement = card.querySelector('.change');
+    const changeElement = card.querySelector('.badge');
     const change = parseFloat(data.change);
     const changePercent = parseFloat(data.change_percent);
     
     changeElement.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
     
     // Update change class for styling
-    changeElement.className = `change ${change >= 0 ? 'positive' : 'negative'}`;
+    changeElement.className = `badge badge-lg ${change >= 0 ? 'badge-success' : 'badge-error'}`;
     
     // Update last updated time
-    const lastUpdatedElement = card.querySelector('.last-updated');
+    const lastUpdatedElement = card.querySelector('.text-base-content\\/60');
     lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
 }
 
-// Auto-refresh every 1 second (silent)
-setInterval(function() {
-    refreshPrices(false);
-}, 1000);
+// Dynamic refresh rate management
+let refreshInterval = null;
+let currentRefreshRate = 5000; // Default 5 seconds
+
+// Function to start auto-refresh with specified interval
+function startAutoRefresh(interval) {
+    // Clear existing interval
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+    }
+    
+    // Start new interval if interval > 0
+    if (interval > 0) {
+        refreshInterval = setInterval(function() {
+            refreshPrices(false);
+            checkAlertTriggers(); // Check for triggered alerts
+        }, interval);
+    }
+}
+
+// Function to update refresh status display
+function updateRefreshStatus(interval) {
+    const statusElement = document.getElementById('refreshStatusCompact');
+    if (interval === 0) {
+        statusElement.textContent = 'Manual';
+    } else {
+        const seconds = interval / 1000;
+        const displayText = seconds >= 60 ? `${seconds / 60}m` : `${seconds}s`;
+        statusElement.textContent = displayText;
+    }
+    
+    // Update active state in dropdown
+    document.querySelectorAll('.refresh-option').forEach(option => {
+        option.classList.remove('active');
+        if (option.getAttribute('data-rate') === interval.toString()) {
+            option.classList.add('active');
+        }
+    });
+}
+
+// Function to save refresh rate to localStorage
+function saveRefreshRate(rate) {
+    localStorage.setItem('stockTrackerRefreshRate', rate.toString());
+}
+
+// Function to load refresh rate from localStorage
+function loadRefreshRate() {
+    const saved = localStorage.getItem('stockTrackerRefreshRate');
+    return saved ? parseInt(saved) : 5000; // Default to 5 seconds
+}
+
+// Initialize refresh rate from localStorage
+currentRefreshRate = loadRefreshRate();
+updateRefreshStatus(currentRefreshRate);
+startAutoRefresh(currentRefreshRate);
 
 // Smart alert form functionality
 document.getElementById('alertCondition').addEventListener('change', function() {
@@ -222,6 +391,27 @@ document.getElementById('alertCondition').addEventListener('change', function() 
 document.getElementById('alertSymbol').addEventListener('change', function() {
     updateTargetField();
     updateCurrentPriceHint();
+});
+
+// Add validation for target input to allow only numerals and decimal point
+document.getElementById('alertValue').addEventListener('input', function(e) {
+    let value = e.target.value;
+    
+    // Remove any non-numeric characters except decimal point
+    value = value.replace(/[^0-9.]/g, '');
+    
+    // Ensure only one decimal point
+    const parts = value.split('.');
+    if (parts.length > 2) {
+        value = parts[0] + '.' + parts.slice(1).join('');
+    }
+    
+    // Limit to 2 decimal places
+    if (parts[1] && parts[1].length > 2) {
+        value = parts[0] + '.' + parts[1].substring(0, 2);
+    }
+    
+    e.target.value = value;
 });
 
 function updateTargetField() {
@@ -413,12 +603,12 @@ function convertFormDataToAPIFormat(symbol, condition, value, name) {
 function getCurrentPrice(symbol) {
     // Get current price from the displayed prices
     if (symbol === 'NIFTY 50') {
-        const priceElement = document.querySelector('.price-card:nth-child(1) .current-price');
+        const priceElement = document.querySelector('.grid > div:nth-child(1) .text-4xl');
         if (priceElement) {
             return parseFloat(priceElement.textContent.replace('₹', '').replace(',', ''));
         }
     } else if (symbol === 'NIFTY BANK') {
-        const priceElement = document.querySelector('.price-card:nth-child(2) .current-price');
+        const priceElement = document.querySelector('.grid > div:nth-child(2) .text-4xl');
         if (priceElement) {
             return parseFloat(priceElement.textContent.replace('₹', '').replace(',', ''));
         }
@@ -450,11 +640,11 @@ function loadStoredAlerts() {
 }
 
 function displayStoredAlerts(alerts) {
-    const alertsList = document.querySelector('.alerts-list');
+    const alertsList = document.querySelector('.space-y-3');
     const noAlerts = document.querySelector('.no-alerts');
     
     // Clear existing alerts (except the no-alerts message)
-    const existingAlerts = alertsList.querySelectorAll('.alert-row');
+    const existingAlerts = alertsList.querySelectorAll('[data-uuid]');
     existingAlerts.forEach(alert => alert.remove());
     
     if (alerts.length === 0) {
@@ -473,21 +663,49 @@ function displayStoredAlerts(alerts) {
 
 function createAlertRow(alert) {
     const row = document.createElement('div');
-    row.className = 'alert-row';
+    row.className = 'card bg-base-100 shadow-sm';
     row.setAttribute('data-uuid', alert.uuid);
     
     // Format the condition display
     const condition = formatConditionDisplay(alert);
     
+    // Check if alert has been triggered
+    const isTriggered = alert.status === 'triggered' || (alert.last_triggered_at && alert.alert_count > 0);
+    const triggerInfo = isTriggered ? 
+        `<div class="mt-1">
+            <div class="badge badge-warning badge-sm">Triggered Once</div>
+            ${alert.last_triggered_at ? `<br><small class="text-xs text-base-content/50">At: ${new Date(alert.last_triggered_at).toLocaleString()}</small>` : ''}
+        </div>` : '';
+    
+    // Determine status badge class
+    let statusClass = 'badge-neutral';
+    if (alert.status === 'enabled') {
+        statusClass = 'badge-success';
+    } else if (alert.status === 'triggered') {
+        statusClass = 'badge-warning';
+    }
+    
     row.innerHTML = `
-        <div class="alert-symbol">${alert.lhs_tradingsymbol}</div>
-        <div class="alert-condition">${condition}</div>
-        <div class="alert-name">${alert.name}</div>
-        <div class="alert-status">
-            <span class="status-badge ${alert.status === 'enabled' ? 'active' : 'inactive'}">${alert.status}</span>
-        </div>
-        <div class="alert-actions">
-            <button class="btn btn-sm btn-danger" onclick="deleteAlert('${alert.uuid}')">Delete</button>
+        <div class="card-body p-4">
+            <div class="grid grid-cols-1 md:grid-cols-5 gap-4 items-center">
+                <div class="font-semibold text-sm">
+                    <div class="badge badge-primary badge-sm">${alert.lhs_tradingsymbol}</div>
+                </div>
+                <div class="text-sm">${condition}</div>
+                <div class="text-sm italic text-base-content/70">${alert.name}</div>
+                <div class="flex justify-center flex-col">
+                    <div class="badge ${statusClass}">${alert.status}</div>
+                    ${triggerInfo}
+                </div>
+                <div class="flex justify-end">
+                    <button class="btn btn-error btn-sm" onclick="deleteAlert('${alert.uuid}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                        Delete
+                    </button>
+                </div>
+            </div>
         </div>
     `;
     
@@ -545,7 +763,7 @@ function deleteAlert(uuid) {
                 alertRow.remove();
                 
                 // Check if no alerts left
-                const remainingAlerts = document.querySelectorAll('.alert-row');
+                const remainingAlerts = document.querySelectorAll('[data-uuid]');
                 if (remainingAlerts.length === 0) {
                     document.querySelector('.no-alerts').style.display = 'block';
                 }
@@ -567,6 +785,97 @@ function deleteAlert(uuid) {
         });
     }
 }
+
+function checkAlertTriggers() {
+    // Check for triggered alerts
+    fetch('/alerts/check-triggers')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.triggered_alerts.length > 0) {
+                // Show notification for triggered alerts
+                data.triggered_alerts.forEach(alert => {
+                    showAlertNotification(alert);
+                });
+                
+                // Refresh the alerts list to show updated trigger status
+                loadStoredAlerts();
+            }
+        })
+        .catch(error => {
+            console.error('Error checking alert triggers:', error);
+        });
+}
+
+function showAlertNotification(alert) {
+    // Create a notification for triggered alert
+    const notification = document.createElement('div');
+    notification.className = 'toast toast-top toast-end z-50';
+    notification.innerHTML = `
+        <div class="alert alert-error shadow-lg animate-slide-in-right">
+            <div>
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 18.5c-.77.833.192 2.5 1.732 2.5z"></path>
+                </svg>
+                <div>
+                    <h3 class="font-bold">🚨 Alert Triggered!</h3>
+                    <div class="text-xs">${alert.name}</div>
+                    <div class="text-xs">${alert.symbol} ${alert.operator} ₹${parseFloat(alert.target_price).toLocaleString()}</div>
+                    <div class="text-xs">Current: ₹${parseFloat(alert.current_price).toLocaleString()}</div>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-circle btn-ghost" onclick="this.closest('.toast').remove()">×</button>
+        </div>
+    `;
+    
+    // Add to page
+    document.body.appendChild(notification);
+    
+    // Auto-remove after 10 seconds
+    setTimeout(() => {
+        if (notification.parentElement) {
+            notification.remove();
+        }
+    }, 10000);
+}
+
+// Event listeners for refresh controls
+document.querySelectorAll('.refresh-option').forEach(option => {
+    option.addEventListener('click', function(e) {
+        e.preventDefault();
+        const newRate = parseInt(this.getAttribute('data-rate'));
+        currentRefreshRate = newRate;
+        saveRefreshRate(newRate);
+        updateRefreshStatus(newRate);
+        startAutoRefresh(newRate);
+        
+        // Close dropdown
+        document.querySelector('[tabindex="0"]').blur();
+    });
+});
+
+document.getElementById('manualRefresh').addEventListener('click', function() {
+    const button = this;
+    const originalText = button.innerHTML;
+    
+    // Show loading state
+    button.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        </svg>
+        Refreshing...
+    `;
+    button.disabled = true;
+    
+    // Perform refresh
+    refreshPrices(true);
+    checkAlertTriggers();
+    
+    // Reset button after a short delay
+    setTimeout(() => {
+        button.innerHTML = originalText;
+        button.disabled = false;
+    }, 1000);
+});
 
 // Initialize the form on page load
 document.addEventListener('DOMContentLoaded', function() {

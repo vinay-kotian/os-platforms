@@ -1,32 +1,92 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Stock Tracker{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%232563eb'%3E%3Cpath d='M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z'/%3E%3C/svg%3E">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563eb',
+                        'primary-hover': '#1d4ed8',
+                        success: '#16a34a',
+                        danger: '#dc2626',
+                        warning: '#d97706',
+                    }
+                }
+            },
+            daisyui: {
+                themes: [
+                    {
+                        light: {
+                            "primary": "#2563eb",
+                            "secondary": "#64748b",
+                            "accent": "#f59e0b",
+                            "neutral": "#1f2937",
+                            "base-100": "#ffffff",
+                            "base-200": "#f9fafb",
+                            "base-300": "#f3f4f6",
+                            "info": "#0ea5e9",
+                            "success": "#16a34a",
+                            "warning": "#d97706",
+                            "error": "#dc2626",
+                        }
+                    }
+                ]
+            }
+        }
+    </script>
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body>
-    <header>
-        <nav>
-            <a href="{{ url_for('index') }}" class="nav-brand">Stock Tracker</a>
-            <div class="nav-links">
-                <a href="{{ url_for('index') }}">Home</a>
-                <a href="{{ url_for('login') }}">Login</a>
-                <a href="{{ url_for('prices') }}">Prices</a>
-                {% if session.get('access_token') %}
-                <a href="{{ url_for('logout') }}">Logout</a>
-                {% endif %}
+<body class="bg-base-200 min-h-screen">
+    <div class="navbar bg-base-100 shadow-lg">
+        <div class="navbar-start">
+            <a href="{{ url_for('index') }}" class="btn btn-ghost text-xl font-bold text-primary">
+                Stock Tracker
+            </a>
+        </div>
+        <div class="navbar-end">
+            <div class="dropdown dropdown-end">
+                <div tabindex="0" role="button" class="btn btn-ghost lg:hidden">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16"></path>
+                    </svg>
+                </div>
+                <ul tabindex="0" class="menu menu-sm dropdown-content mt-3 z-[1] p-2 shadow bg-base-100 rounded-box w-52">
+                    <li><a href="{{ url_for('index') }}">Home</a></li>
+                    <li><a href="{{ url_for('login') }}">Login</a></li>
+                    <li><a href="{{ url_for('prices') }}">Prices</a></li>
+                    {% if session.get('access_token') %}
+                    <li><a href="{{ url_for('logout') }}" class="text-error">Logout</a></li>
+                    {% endif %}
+                </ul>
             </div>
-        </nav>
-    </header>
+            <div class="hidden lg:flex">
+                <ul class="menu menu-horizontal px-1">
+                    <li><a href="{{ url_for('index') }}" class="btn btn-ghost">Home</a></li>
+                    <li><a href="{{ url_for('login') }}" class="btn btn-ghost">Login</a></li>
+                    <li><a href="{{ url_for('prices') }}" class="btn btn-ghost">Prices</a></li>
+                    {% if session.get('access_token') %}
+                    <li><a href="{{ url_for('logout') }}" class="btn btn-ghost text-error">Logout</a></li>
+                    {% endif %}
+                </ul>
+            </div>
+        </div>
+    </div>
 
-    <main>
+    <main class="container mx-auto px-4 py-8">
         {% block content %}{% endblock %}
     </main>
 
-    <footer>
-        <p>&copy; 2024 Flask App</p>
+    <footer class="footer footer-center p-4 bg-base-100 text-base-content border-t border-base-300 mt-16">
+        <aside>
+            <p>&copy; 2024 Stock Tracker. Built with Flask & DaisyUI</p>
+        </aside>
     </footer>
 
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>

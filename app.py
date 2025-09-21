@@ -53,9 +53,22 @@ def init_database():
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 stored_at TEXT NOT NULL,
-                kite_response TEXT NOT NULL
+                kite_response TEXT NOT NULL,
+                last_triggered_at TEXT,
+                last_triggered_price REAL
             )
         ''')
+        
+        # Add new columns if they don't exist (for existing databases)
+        try:
+            cursor.execute('ALTER TABLE alerts ADD COLUMN last_triggered_at TEXT')
+        except:
+            pass  # Column already exists
+        
+        try:
+            cursor.execute('ALTER TABLE alerts ADD COLUMN last_triggered_price REAL')
+        except:
+            pass  # Column already exists
         
         conn.commit()
         conn.close()
@@ -139,7 +152,7 @@ def get_stored_alerts():
             SELECT uuid, name, user_id, lhs_exchange, lhs_tradingsymbol, lhs_attribute,
                    operator, rhs_type, rhs_constant, rhs_exchange, rhs_tradingsymbol,
                    rhs_attribute, type, status, alert_count, disabled_reason,
-                   created_at, updated_at, stored_at
+                   created_at, updated_at, stored_at, last_triggered_at, last_triggered_price
             FROM alerts
             ORDER BY stored_at DESC
         ''')
@@ -165,7 +178,9 @@ def get_stored_alerts():
                 'disabled_reason': row[15],
                 'created_at': row[16],
                 'updated_at': row[17],
-                'stored_at': row[18]
+                'stored_at': row[18],
+                'last_triggered_at': row[19],
+                'last_triggered_price': row[20]
             })
         
         conn.close()
@@ -237,8 +252,14 @@ def before_request():
 
 @app.route('/')
 def index():
-    """Home page"""
-    return render_template('index.html')
+    """Home page - redirect based on login status"""
+    # Check if user is logged in (has access token and kite instance)
+    if session.get('access_token') and kite:
+        # User is logged in, redirect to prices page
+        return redirect(url_for('prices'))
+    else:
+        # User is not logged in, show login page
+        return render_template('index.html')
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -602,6 +623,26 @@ def get_stored_alert_by_uuid(uuid):
     except Exception as e:
         return jsonify({'error': f'Error retrieving alert: {str(e)}'}), 500
 
+@app.route('/alerts/check-triggers', methods=['GET'])
+def check_alert_triggers_endpoint():
+    """API endpoint to check for triggered alerts"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        triggered_alerts = check_alert_triggers()
+        return jsonify({
+            'triggered_alerts': triggered_alerts,
+            'count': len(triggered_alerts),
+            'success': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error checking alert triggers: {str(e)}'}), 500
+
 @app.route('/alerts/delete/<uuid>', methods=['DELETE'])
 def delete_alert(uuid):
     """API endpoint to delete an alert by UUID"""
@@ -657,6 +698,101 @@ def delete_alert_from_database(uuid):
         
     except Exception as e:
         print(f"Error deleting alert from database: {e}")
+        return False
+
+def check_alert_triggers():
+    """Check if any stored alerts should be triggered based on current prices"""
+    try:
+        # Get current prices
+        if not kite:
+            return []
+        
+        # Fetch current prices for NIFTY 50 and NIFTY BANK
+        nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+        bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+        
+        current_prices = {
+            'NIFTY 50': nifty_data.get('last_price', 0),
+            'NIFTY BANK': bank_nifty_data.get('last_price', 0)
+        }
+        
+        # Get all active alerts from database
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT uuid, name, lhs_tradingsymbol, operator, rhs_constant, status, alert_count
+            FROM alerts
+            WHERE status = 'enabled' AND alert_count = 0
+        ''')
+        
+        alerts = cursor.fetchall()
+        triggered_alerts = []
+        
+        for alert in alerts:
+            uuid, name, symbol, operator, target_value, status, alert_count = alert
+            
+            current_price = current_prices.get(symbol, 0)
+            if current_price == 0:
+                continue
+            
+            # Check if alert condition is met
+            is_triggered = False
+            if operator == '>=' and current_price >= target_value:
+                is_triggered = True
+            elif operator == '<=' and current_price <= target_value:
+                is_triggered = True
+            elif operator == '>' and current_price > target_value:
+                is_triggered = True
+            elif operator == '<' and current_price < target_value:
+                is_triggered = True
+            elif operator == '==' and abs(current_price - target_value) < 0.01:
+                is_triggered = True
+            
+            if is_triggered:
+                # Update alert status to triggered
+                update_alert_trigger_status(uuid, current_price, alert_count + 1)
+                triggered_alerts.append({
+                    'uuid': uuid,
+                    'name': name,
+                    'symbol': symbol,
+                    'current_price': current_price,
+                    'target_price': target_value,
+                    'operator': operator,
+                    'triggered_at': datetime.now().isoformat()
+                })
+        
+        conn.close()
+        return triggered_alerts
+        
+    except Exception as e:
+        print(f"Error checking alert triggers: {e}")
+        return []
+
+def update_alert_trigger_status(uuid, current_price, new_alert_count):
+    """Update alert status when triggered - mark as triggered (one-time only)"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Update alert count to 1 (triggered once) and mark as triggered
+        cursor.execute('''
+            UPDATE alerts 
+            SET alert_count = 1, 
+                last_triggered_at = ?,
+                last_triggered_price = ?,
+                status = 'triggered'
+            WHERE uuid = ?
+        ''', (datetime.now().isoformat(), current_price, uuid))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"Alert triggered once: {uuid} at price {current_price} - now marked as triggered")
+        return True
+        
+    except Exception as e:
+        print(f"Error updating alert trigger status: {e}")
         return False
 
 @app.route('/session/status')
