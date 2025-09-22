@@ -171,12 +171,20 @@
     
         <!-- Active Alerts List -->
         <div class="bg-base-200 rounded-lg p-6">
-            <h3 class="text-lg font-semibold mb-4 flex items-center gap-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
-                </svg>
-                Active Alerts
-            </h3>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-lg font-semibold flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                    </svg>
+                    Active Alerts
+                </h3>
+                <button id="syncAlertsBtn" class="btn btn-sm btn-outline" onclick="syncAlerts()">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Sync
+                </button>
+            </div>
             <div class="space-y-3">
                 <!-- Dynamic alerts will be loaded here via JavaScript -->
                 <div class="no-alerts text-center py-8 text-base-content/50 italic">
@@ -263,6 +271,48 @@ function refreshPrices(showButtonState = false) {
 function refreshAlerts() {
     // Refresh alerts from Zerodha API
     loadStoredAlerts();
+}
+
+function syncAlerts() {
+    // Manual sync with Zerodha
+    const syncBtn = document.getElementById('syncAlertsBtn');
+    const originalText = syncBtn.innerHTML;
+    
+    // Show loading state
+    syncBtn.innerHTML = `
+        <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+        </svg>
+        Syncing...
+    `;
+    syncBtn.disabled = true;
+    
+    // Call sync API
+    fetch('/alerts/sync', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Refresh alerts after sync
+            refreshAlerts();
+            alert('Alerts synced successfully!');
+        } else {
+            alert('Error syncing alerts: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error syncing alerts: ' + error.message);
+    })
+    .finally(() => {
+        // Reset button state
+        syncBtn.innerHTML = originalText;
+        syncBtn.disabled = false;
+    });
 }
 
 function updatePriceCard(type, data) {

@@ -516,7 +516,7 @@ def create_alert():
 
 @app.route('/alerts', methods=['GET'])
 def get_alerts():
-    """API endpoint to get all alerts from KITE API"""
+    """API endpoint to get all alerts from KITE API with automatic sync"""
     global kite
     
     # Check if user is logged in
@@ -524,6 +524,9 @@ def get_alerts():
         return jsonify({'error': 'Not authenticated'}), 401
     
     try:
+        # First, sync alerts to remove any orphaned alerts from database
+        sync_alerts_with_zerodha()
+        
         # Get API credentials from session
         api_key = session.get('api_key')
         access_token = session.get('access_token')
@@ -679,6 +682,25 @@ def delete_alert(uuid):
     except Exception as e:
         return jsonify({'error': f'Error deleting alert: {str(e)}'}), 500
 
+@app.route('/alerts/sync', methods=['POST'])
+def sync_alerts():
+    """API endpoint to manually sync alerts with Zerodha"""
+    global kite
+    
+    # Check if user is logged in
+    if not session.get('access_token') or not kite:
+        return jsonify({'error': 'Not authenticated'}), 401
+    
+    try:
+        success = sync_alerts_with_zerodha()
+        if success:
+            return jsonify({'message': 'Alerts synced successfully', 'success': True}), 200
+        else:
+            return jsonify({'error': 'Failed to sync alerts', 'success': False}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error syncing alerts: {str(e)}'}), 500
+
 def delete_alert_from_database(uuid):
     """Delete alert from local database"""
     try:
@@ -698,6 +720,73 @@ def delete_alert_from_database(uuid):
         
     except Exception as e:
         print(f"Error deleting alert from database: {e}")
+        return False
+
+def sync_alerts_with_zerodha():
+    """Sync local database alerts with Zerodha - remove alerts that no longer exist in Zerodha"""
+    global kite
+    
+    if not session.get('access_token') or not kite:
+        print("Cannot sync alerts: Not authenticated")
+        return False
+    
+    try:
+        # Get API credentials from session
+        api_key = session.get('api_key')
+        access_token = session.get('access_token')
+        
+        # Prepare headers
+        headers = {
+            'X-Kite-Version': '3',
+            'Authorization': f'token {api_key}:{access_token}'
+        }
+        
+        # Get alerts from Zerodha
+        response = requests.get(
+            'https://api.kite.trade/alerts',
+            headers=headers
+        )
+        
+        if response.status_code != 200:
+            print(f"Failed to fetch alerts from Zerodha: {response.text}")
+            return False
+        
+        zerodha_data = response.json()
+        zerodha_alerts = zerodha_data.get('data', [])
+        zerodha_uuids = {alert['uuid'] for alert in zerodha_alerts}
+        
+        # Get alerts from local database
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT uuid, name FROM alerts')
+        db_alerts = cursor.fetchall()
+        
+        # Find alerts in database that are not in Zerodha
+        alerts_to_delete = []
+        for db_uuid, db_name in db_alerts:
+            if db_uuid not in zerodha_uuids:
+                alerts_to_delete.append((db_uuid, db_name))
+        
+        # Delete orphaned alerts from database
+        deleted_count = 0
+        for uuid, name in alerts_to_delete:
+            cursor.execute('DELETE FROM alerts WHERE uuid = ?', (uuid,))
+            if cursor.rowcount > 0:
+                deleted_count += 1
+                print(f"Deleted orphaned alert from database: {name} ({uuid})")
+        
+        if deleted_count > 0:
+            conn.commit()
+            print(f"Sync completed: {deleted_count} orphaned alerts removed from database")
+        else:
+            print("Sync completed: No orphaned alerts found")
+        
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"Error syncing alerts with Zerodha: {e}")
         return False
 
 def check_alert_triggers():
