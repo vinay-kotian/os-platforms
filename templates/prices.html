@@ -585,12 +585,14 @@ function clearAlertForm() {
 }
 
 function loadStoredAlerts() {
-    // Load alerts from Zerodha API only
+    // Load alerts from Zerodha API
     fetch('/alerts')
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                displayZerodhaAlerts(data.alerts);
+                // Handle KITE API response structure: data.alerts.data
+                const alerts = data.alerts && data.alerts.data ? data.alerts.data : data.alerts || [];
+                displayZerodhaAlerts(alerts);
             } else {
                 console.error('Error loading alerts from Zerodha:', data.error);
                 // Fallback to show empty state
@@ -605,6 +607,7 @@ function loadStoredAlerts() {
 }
 
 function displayZerodhaAlerts(alerts) {
+    console.log('Displaying alerts:', alerts);
     const alertsList = document.querySelector('.space-y-3');
     const noAlerts = document.querySelector('.no-alerts');
     
@@ -612,11 +615,13 @@ function displayZerodhaAlerts(alerts) {
     const existingAlerts = alertsList.querySelectorAll('.card');
     existingAlerts.forEach(alert => alert.remove());
     
-    if (alerts.length === 0) {
+    if (!alerts || alerts.length === 0) {
+        console.log('No alerts to display, showing empty state');
         noAlerts.style.display = 'block';
         return;
     }
     
+    console.log(`Displaying ${alerts.length} alerts`);
     noAlerts.style.display = 'none';
     
     // Display each alert from Zerodha
