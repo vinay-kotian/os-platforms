@@ -352,7 +352,12 @@ function startAutoRefresh(interval) {
     if (interval > 0) {
         refreshInterval = setInterval(function() {
             refreshPrices(false);
-            refreshAlerts(); // Refresh alerts from Zerodha
+            // Only refresh alerts every 30 seconds to reduce flickering
+            // Check if it's time to refresh alerts (every 30 seconds)
+            if (!window.lastAlertRefresh || Date.now() - window.lastAlertRefresh > 30000) {
+                refreshAlerts();
+                window.lastAlertRefresh = Date.now();
+            }
             checkAlertTriggers(); // Check for triggered alerts
         }, interval);
     }
@@ -635,10 +640,26 @@ function clearAlertForm() {
 }
 
 function loadStoredAlerts() {
+    // Add subtle loading indicator
+    const alertsList = document.querySelector('.space-y-3');
+    if (alertsList && !alertsList.querySelector('.loading-indicator')) {
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.className = 'loading-indicator text-center py-2 text-sm text-gray-500';
+        loadingIndicator.innerHTML = 'Updating alerts...';
+        loadingIndicator.style.opacity = '0.7';
+        alertsList.appendChild(loadingIndicator);
+    }
+    
     // Load alerts from Zerodha API
     fetch('/alerts')
         .then(response => response.json())
         .then(data => {
+            // Remove loading indicator
+            const loadingIndicator = document.querySelector('.loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+            }
+            
             if (data.success) {
                 // Handle KITE API response structure: data.alerts.data
                 const alerts = data.alerts && data.alerts.data ? data.alerts.data : data.alerts || [];
@@ -650,6 +671,12 @@ function loadStoredAlerts() {
             }
         })
         .catch(error => {
+            // Remove loading indicator
+            const loadingIndicator = document.querySelector('.loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.remove();
+            }
+            
             console.error('Error loading alerts from Zerodha:', error);
             // Fallback to show empty state
             displayZerodhaAlerts([]);
@@ -661,24 +688,81 @@ function displayZerodhaAlerts(alerts) {
     const alertsList = document.querySelector('.space-y-3');
     const noAlerts = document.querySelector('.no-alerts');
     
-    // Clear all existing alerts (except the no-alerts message)
-    const existingAlerts = alertsList.querySelectorAll('.card');
-    existingAlerts.forEach(alert => alert.remove());
-    
     if (!alerts || alerts.length === 0) {
         console.log('No alerts to display, showing empty state');
-        noAlerts.style.display = 'block';
+        // Only update if we need to show empty state
+        if (noAlerts.style.display !== 'block') {
+            // Clear all existing alerts
+            const existingAlerts = alertsList.querySelectorAll('.card');
+            existingAlerts.forEach(alert => alert.remove());
+            noAlerts.style.display = 'block';
+        }
         return;
     }
     
     console.log(`Displaying ${alerts.length} alerts`);
     noAlerts.style.display = 'none';
     
-    // Display each alert from Zerodha
-    alerts.forEach(alert => {
-        const alertRow = createZerodhaAlertRow(alert);
-        alertsList.appendChild(alertRow);
+    // Get current alert UUIDs in DOM
+    const existingAlerts = alertsList.querySelectorAll('.card[data-uuid]');
+    const existingUuids = new Set();
+    existingAlerts.forEach(alert => {
+        const uuid = alert.getAttribute('data-uuid');
+        if (uuid) existingUuids.add(uuid);
     });
+    
+    // Get new alert UUIDs
+    const newUuids = new Set(alerts.map(alert => alert.uuid));
+    
+    // Remove alerts that no longer exist
+    existingAlerts.forEach(alert => {
+        const uuid = alert.getAttribute('data-uuid');
+        if (uuid && !newUuids.has(uuid)) {
+            alert.remove();
+        }
+    });
+    
+    // Add or update alerts
+    alerts.forEach(alert => {
+        const existingAlert = alertsList.querySelector(`[data-uuid="${alert.uuid}"]`);
+        if (existingAlert) {
+            // Update existing alert (only if data changed)
+            updateExistingAlert(existingAlert, alert);
+        } else {
+            // Add new alert
+            const alertRow = createZerodhaAlertRow(alert);
+            alertsList.appendChild(alertRow);
+        }
+    });
+}
+
+function updateExistingAlert(existingElement, alertData) {
+    // Only update if the data has actually changed
+    // This prevents unnecessary DOM updates that cause flickering
+    const currentStatus = existingElement.querySelector('.badge').textContent.trim();
+    const newStatus = alertData.status;
+    
+    if (currentStatus !== newStatus) {
+        // Update status badge
+        const statusBadge = existingElement.querySelector('.badge');
+        let statusClass = 'badge-neutral';
+        if (alertData.status === 'enabled') {
+            statusClass = 'badge-success';
+        } else if (alertData.status === 'triggered') {
+            statusClass = 'badge-warning';
+        } else if (alertData.status === 'disabled') {
+            statusClass = 'badge-error';
+        }
+        
+        statusBadge.className = `badge ${statusClass}`;
+        statusBadge.textContent = alertData.status;
+    }
+    
+    // Update trigger count if it changed
+    const triggerInfo = existingElement.querySelector('.badge-warning');
+    if (triggerInfo && alertData.alert_count > 0) {
+        triggerInfo.textContent = `Triggered ${alertData.alert_count} times`;
+    }
 }
 
 function displayStoredAlerts(alerts) {
