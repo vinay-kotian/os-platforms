@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import sqlite3
+import uuid
 from datetime import datetime
 from flask import Flask, redirect, request, session, url_for, render_template, flash
 from flask.json import jsonify
@@ -70,12 +71,97 @@ def init_database():
         except:
             pass  # Column already exists
         
+        # Create three_levels table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS three_levels (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                uuid TEXT UNIQUE NOT NULL,
+                user_id TEXT NOT NULL,
+                index_type TEXT NOT NULL,  -- 'BANK_NIFTY' or 'NIFTY_50'
+                level_number INTEGER NOT NULL,  -- 1, 2, or 3
+                level_value REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, index_type, level_number)
+            )
+        ''')
+        
         conn.commit()
         conn.close()
         print("Database initialized successfully")
         
     except Exception as e:
         print(f"Error initializing database: {e}")
+
+def save_three_level(user_id, index_type, level_number, level_value):
+    """Save a three level to the database"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        current_time = datetime.now().isoformat()
+        
+        # Check if level already exists to get existing UUID or create new one
+        cursor.execute('''
+            SELECT uuid FROM three_levels 
+            WHERE user_id = ? AND index_type = ? AND level_number = ?
+        ''', (user_id, index_type, level_number))
+        
+        existing_level = cursor.fetchone()
+        level_uuid = existing_level[0] if existing_level else str(uuid.uuid4())
+        
+        # Insert or update the level with UUID
+        cursor.execute('''
+            INSERT OR REPLACE INTO three_levels 
+            (uuid, user_id, index_type, level_number, level_value, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (level_uuid, user_id, index_type, level_number, level_value, current_time, current_time))
+        
+        conn.commit()
+        conn.close()
+        print(f"Three level saved with UUID: {level_uuid}")
+        return True
+    except Exception as e:
+        print(f"Error saving three level: {e}")
+        return False
+
+def get_three_levels(user_id):
+    """Get all three levels for a user"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT uuid, index_type, level_number, level_value, updated_at
+            FROM three_levels 
+            WHERE user_id = ?
+            ORDER BY index_type, level_number
+        ''', (user_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        # Convert to dictionary format
+        levels = {
+            'BANK_NIFTY': {1: None, 2: None, 3: None},
+            'NIFTY_50': {1: None, 2: None, 3: None}
+        }
+        
+        for row in results:
+            level_uuid, index_type, level_number, level_value, updated_at = row
+            levels[index_type][level_number] = {
+                'uuid': level_uuid,
+                'value': level_value,
+                'updated_at': updated_at
+            }
+        
+        return levels
+    except Exception as e:
+        print(f"Error getting three levels: {e}")
+        return {
+            'BANK_NIFTY': {1: None, 2: None, 3: None},
+            'NIFTY_50': {1: None, 2: None, 3: None}
+        }
 
 def store_alert_response(alert_data, kite_response):
     """Store alert response in database"""
@@ -701,6 +787,216 @@ def sync_alerts():
     except Exception as e:
         return jsonify({'error': f'Error syncing alerts: {str(e)}'}), 500
 
+# Simple in-memory price history for tracking crossings (in production, use Redis or database)
+price_history = {}
+
+@app.route('/alerts/prices', methods=['GET'])
+def get_alert_prices():
+    """API endpoint to get current prices for all alerts with crossing detection"""
+    global kite, price_history
+    
+    # Check if user is logged in and kite is initialized
+    if not session.get('access_token'):
+        return jsonify({'error': 'Not authenticated - no access token'}), 401
+    
+    if not kite:
+        return jsonify({'error': 'KiteConnect not initialized'}), 401
+    
+    try:
+        # Use the global kite object to fetch alerts
+        alerts_data = kite.alerts
+        alerts = alerts_data.get('data', [])
+        
+        # Fetch current prices for each alert
+        alerts_with_prices = []
+        for alert in alerts:
+            symbol = alert.get('lhs_tradingsymbol', '')
+            current_price = get_current_price_for_symbol(symbol)
+            target_price = alert.get('rhs_constant', 0)
+            operator = alert.get('operator', '')
+            
+            # Get previous price from history
+            previous_price = None
+            if symbol in price_history:
+                previous_price = price_history[symbol]
+            
+            # Check if price has crossed the level
+            crossing_info = check_price_touch_level(current_price, target_price, operator, previous_price)
+            
+            # Update price history for next comparison
+            price_history[symbol] = current_price
+            
+            # Add current price, instrument info, and crossing information to alert
+            alert['current_price'] = current_price
+            alert['instrument_type'] = get_instrument_type(symbol)
+            alert['crossing_info'] = crossing_info
+            
+            alerts_with_prices.append(alert)
+        
+        # Update the response with enhanced alert data
+        alerts_data['data'] = alerts_with_prices
+        
+        return jsonify({'alerts': alerts_data, 'success': True}), 200
+        
+    except Exception as e:
+        error_msg = str(e)
+        print(f"Error in get_alert_prices: {error_msg}")
+        
+        # Check if it's a token error
+        if "TokenException" in error_msg or "Incorrect" in error_msg:
+            return jsonify({'error': 'Authentication failed. Please login again.', 'success': False}), 401
+        else:
+            return jsonify({'error': f'Error fetching alert prices: {error_msg}', 'success': False}), 500
+
+@app.route('/debug/auth', methods=['GET'])
+def debug_auth():
+    """Debug endpoint to check authentication status"""
+    global kite
+    
+    debug_info = {
+        'session_access_token': bool(session.get('access_token')),
+        'session_api_key': bool(session.get('api_key')),
+        'global_kite_initialized': kite is not None,
+        'global_api_key': user_api_key is not None,
+        'session_file_exists': os.path.exists(SESSION_FILE)
+    }
+    
+    if kite:
+        try:
+            # Test if kite object is working
+            profile = kite.profile()
+            debug_info['kite_profile'] = profile.get('user_name', 'Unknown')
+            debug_info['kite_status'] = 'working'
+        except Exception as e:
+            debug_info['kite_error'] = str(e)
+            debug_info['kite_status'] = 'error'
+    
+        return jsonify(debug_info)
+
+@app.route('/three-levels/save', methods=['POST'])
+def save_three_level_endpoint():
+    """API endpoint to save a three level"""
+    try:
+        data = request.get_json()
+        index_type = data.get('index_type')  # 'BANK_NIFTY' or 'NIFTY_50'
+        level_number = data.get('level_number')  # 1, 2, or 3
+        level_value = data.get('level_value')
+        
+        if not all([index_type, level_number, level_value]):
+            return jsonify({'error': 'Missing required fields', 'success': False}), 400
+        
+        if index_type not in ['BANK_NIFTY', 'NIFTY_50']:
+            return jsonify({'error': 'Invalid index_type', 'success': False}), 400
+        
+        if level_number not in [1, 2, 3]:
+            return jsonify({'error': 'Invalid level_number', 'success': False}), 400
+        
+        # Use a default user_id for now (you can modify this based on your auth system)
+        user_id = 'default_user'
+        
+        success = save_three_level(user_id, index_type, level_number, level_value)
+        
+        if success:
+            # Get the UUID of the saved level
+            try:
+                conn = sqlite3.connect(DATABASE_FILE)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT uuid FROM three_levels 
+                    WHERE user_id = ? AND index_type = ? AND level_number = ?
+                ''', (user_id, index_type, level_number))
+                result = cursor.fetchone()
+                conn.close()
+                
+                level_uuid = result[0] if result else None
+                return jsonify({
+                    'message': 'Level saved successfully', 
+                    'success': True, 
+                    'uuid': level_uuid
+                }), 200
+            except Exception as e:
+                return jsonify({
+                    'message': 'Level saved successfully', 
+                    'success': True
+                }), 200
+        else:
+            return jsonify({'error': 'Failed to save level', 'success': False}), 500
+            
+    except Exception as e:
+        return jsonify({'error': f'Error saving level: {str(e)}', 'success': False}), 500
+
+@app.route('/three-levels/get', methods=['GET'])
+def get_three_levels_endpoint():
+    """API endpoint to get all three levels"""
+    try:
+        # Use a default user_id for now (you can modify this based on your auth system)
+        user_id = 'default_user'
+        
+        levels = get_three_levels(user_id)
+        return jsonify({'levels': levels, 'success': True}), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error getting levels: {str(e)}', 'success': False}), 500
+
+@app.route('/three-levels/get/<uuid>', methods=['GET'])
+def get_three_level_by_uuid_endpoint(level_uuid):
+    """API endpoint to get a specific three level by UUID"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT uuid, user_id, index_type, level_number, level_value, created_at, updated_at
+            FROM three_levels 
+            WHERE uuid = ?
+        ''', (level_uuid,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        if result:
+            level_uuid, user_id, index_type, level_number, level_value, created_at, updated_at = result
+            return jsonify({
+                'level': {
+                    'uuid': level_uuid,
+                    'user_id': user_id,
+                    'index_type': index_type,
+                    'level_number': level_number,
+                    'level_value': level_value,
+                    'created_at': created_at,
+                    'updated_at': updated_at
+                },
+                'success': True
+            }), 200
+        else:
+            return jsonify({'error': 'Level not found', 'success': False}), 404
+            
+    except Exception as e:
+        return jsonify({'error': f'Error getting level: {str(e)}', 'success': False}), 500
+
+@app.route('/three-levels/delete/<uuid>', methods=['DELETE'])
+def delete_three_level_endpoint(level_uuid):
+    """API endpoint to delete a three level by UUID"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Check if level exists
+        cursor.execute('SELECT uuid FROM three_levels WHERE uuid = ?', (level_uuid,))
+        if not cursor.fetchone():
+            conn.close()
+            return jsonify({'error': 'Level not found', 'success': False}), 404
+        
+        # Delete the level
+        cursor.execute('DELETE FROM three_levels WHERE uuid = ?', (level_uuid,))
+        conn.commit()
+        conn.close()
+        
+        return jsonify({'message': 'Level deleted successfully', 'success': True}), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error deleting level: {str(e)}', 'success': False}), 500
+
 def delete_alert_from_database(uuid):
     """Delete alert from local database"""
     try:
@@ -788,6 +1084,142 @@ def sync_alerts_with_zerodha():
     except Exception as e:
         print(f"Error syncing alerts with Zerodha: {e}")
         return False
+
+def get_current_price_for_symbol(symbol):
+    """Get current price for a given symbol"""
+    global kite
+    
+    if not kite:
+        return 0
+    
+    try:
+        # Map symbol to KITE format
+        kite_symbol = f"NSE:{symbol}"
+        
+        # Fetch current price
+        quote_data = kite.quote(kite_symbol).get(kite_symbol, {})
+        current_price = quote_data.get('last_price', 0)
+        
+        return current_price
+        
+    except Exception as e:
+        print(f"Error fetching price for {symbol}: {e}")
+        return 0
+
+def get_instrument_type(symbol):
+    """Get instrument type (NIFTY or BANK NIFTY) for display"""
+    if symbol == 'NIFTY 50':
+        return 'NIFTY'
+    elif symbol == 'NIFTY BANK':
+        return 'BANK NIFTY'
+    else:
+        return symbol
+
+def check_price_touch_level(current_price, target_price, operator, previous_price=None):
+    """Check if current price has crossed the alert level today and determine crossing direction"""
+    if current_price == 0 or target_price == 0:
+        return {'crossed': False, 'direction': None, 'status': 'no_data', 'crossed_today': False}
+    
+    # Check if price has crossed the level based on operator
+    crossed = False
+    direction = None
+    crossed_today = False
+    
+    # Determine if we have a crossing (price moved from one side to the other)
+    if previous_price and previous_price != current_price:
+        if operator == '>=':
+            # Crossed from below to above/at target
+            if previous_price < target_price and current_price >= target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'up'  # Price crossed up from below
+            # Crossed from above to below target
+            elif previous_price >= target_price and current_price < target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'down'  # Price crossed down from above
+        elif operator == '<=':
+            # Crossed from above to below/at target
+            if previous_price > target_price and current_price <= target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'down'  # Price crossed down from above
+            # Crossed from below to above target
+            elif previous_price <= target_price and current_price > target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'up'  # Price crossed up from below
+        elif operator == '>':
+            # Crossed from below/at to above target
+            if previous_price <= target_price and current_price > target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'up'  # Price crossed up
+            # Crossed from above to below/at target
+            elif previous_price > target_price and current_price <= target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'down'  # Price crossed down
+        elif operator == '<':
+            # Crossed from above/at to below target
+            if previous_price >= target_price and current_price < target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'down'  # Price crossed down
+            # Crossed from below to above/at target
+            elif previous_price < target_price and current_price >= target_price:
+                crossed = True
+                crossed_today = True
+                direction = 'up'  # Price crossed up
+        elif operator == '==':
+            # For exact match, check if price crossed the exact level
+            tolerance = 0.01
+            if (abs(previous_price - target_price) > tolerance and 
+                abs(current_price - target_price) <= tolerance):
+                crossed = True
+                crossed_today = True
+                direction = 'up' if previous_price < target_price else 'down'
+    
+    # If no previous price, we can't determine crossing, but we can show current position
+    if not previous_price:
+        if operator == '>=' and current_price >= target_price:
+            direction = 'above_or_at'
+        elif operator == '<=' and current_price <= target_price:
+            direction = 'below_or_at'
+        elif operator == '>' and current_price > target_price:
+            direction = 'above'
+        elif operator == '<' and current_price < target_price:
+            direction = 'below'
+        elif operator == '==' and abs(current_price - target_price) <= 0.01:
+            direction = 'at_level'
+        else:
+            if current_price > target_price:
+                direction = 'above'
+            else:
+                direction = 'below'
+    
+    # Determine status
+    if crossed:
+        status = 'crossed'
+    else:
+        # Check how close we are to the target
+        distance = abs(current_price - target_price)
+        if distance <= target_price * 0.01:  # Within 1%
+            status = 'close'
+        else:
+            status = 'far'
+    
+    return {
+        'crossed': crossed,
+        'crossed_today': crossed_today,
+        'direction': direction,
+        'status': status,
+        'distance': abs(current_price - target_price),
+        'distance_percent': abs(current_price - target_price) / target_price * 100 if target_price > 0 else 0,
+        'current_price': current_price,
+        'target_price': target_price,
+        'operator': operator
+    }
 
 def check_alert_triggers():
     """Check if any stored alerts should be triggered based on current prices"""
@@ -933,4 +1365,38 @@ def internal_error(error):
 
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5001)
+    import os
+    import sys
+    
+    # Check if we're running in debug mode from UI
+    is_debugging = (
+        '--debug' in sys.argv or 
+        'debug' in os.environ.get('FLASK_ENV', '').lower() or
+        'PYTHONPATH' in os.environ or  # VS Code debugger sets this
+        'DEBUGPY' in os.environ or     # VS Code Python debugger
+        len(sys.argv) > 1 and any('debug' in arg.lower() for arg in sys.argv)
+    )
+    
+    port = 5002
+    
+    # Set environment variables to prevent multiple processes during debugging
+    os.environ['FLASK_ENV'] = 'development'
+    os.environ['FLASK_DEBUG'] = '1'
+    
+    # Disable Flask's auto-reloader when debugging to prevent multiple instances
+    use_reloader = not is_debugging
+    
+    print(f"🚀 Starting Flask app on port {port}")
+    print("📊 Three levels database storage enabled")
+    print(f"🔧 Debug mode: {'ON' if is_debugging else 'OFF'}")
+    print(f"🔄 Auto-reloader: {'OFF' if not use_reloader else 'ON'}")
+    
+    # Run with settings optimized for debugging
+    app.run(
+        debug=True, 
+        host='0.0.0.0', 
+        port=port,
+        use_reloader=use_reloader,  # Disable reloader when debugging to prevent multiple instances
+        threaded=True,
+        processes=1  # Force single process
+    )
