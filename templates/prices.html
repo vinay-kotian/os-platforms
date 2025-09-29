@@ -779,8 +779,8 @@ function loadStoredAlerts() {
         alertsList.appendChild(loadingIndicator);
     }
     
-    // Load alerts from Zerodha API
-    fetch('/alerts')
+    // Load alerts from Zerodha API with price data
+    fetch('/alerts/prices')
         .then(response => response.json())
         .then(data => {
             // Remove loading indicator

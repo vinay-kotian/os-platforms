@@ -737,14 +737,19 @@ def delete_alert(uuid):
     """API endpoint to delete an alert by UUID"""
     global kite
     
+    print(f"Delete alert request for UUID: {uuid}")
+    
     # Check if user is logged in
     if not session.get('access_token') or not kite:
+        print("Delete failed: Not authenticated")
         return jsonify({'error': 'Not authenticated'}), 401
     
     try:
         # Get API credentials from session
         api_key = session.get('api_key')
         access_token = session.get('access_token')
+        
+        print(f"Using API key: {api_key[:10]}... and access token: {access_token[:10]}...")
         
         # Prepare headers
         headers = {
@@ -753,19 +758,26 @@ def delete_alert(uuid):
         }
         
         # Send DELETE request to KITE alerts API
+        print(f"Sending DELETE request to: https://api.kite.trade/alerts/{uuid}")
         response = requests.delete(
             f'https://api.kite.trade/alerts/{uuid}',
             headers=headers
         )
         
+        print(f"KITE API response status: {response.status_code}")
+        print(f"KITE API response text: {response.text}")
+        
         if response.status_code == 200:
             # Also delete from local database
             delete_alert_from_database(uuid)
+            print(f"Alert {uuid} deleted successfully from both KITE and database")
             return jsonify({'message': 'Alert deleted successfully', 'success': True}), 200
         else:
+            print(f"Failed to delete alert from KITE: {response.text}")
             return jsonify({'error': f'Failed to delete alert: {response.text}', 'success': False}), 500
             
     except Exception as e:
+        print(f"Exception during alert deletion: {str(e)}")
         return jsonify({'error': f'Error deleting alert: {str(e)}'}), 500
 
 @app.route('/alerts/sync', methods=['POST'])
