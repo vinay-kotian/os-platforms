@@ -1279,9 +1279,13 @@ function updateNiftyLevelDisplay(levelNumber) {
 }
 
 function updateBankNiftyPrice(price) {
+    const previousPrice = bankNiftyPrice;
     bankNiftyPrice = price;
     document.getElementById('bankCurrentPriceDisplay').textContent = `₹${price.toFixed(2)}`;
     document.getElementById('bankPriceUpdateTime').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
+    
+    // Check for level breaches
+    checkBankLevelBreaches(price, previousPrice);
     
     // Update all bank level displays
     for (let i = 1; i <= 3; i++) {
@@ -1290,13 +1294,150 @@ function updateBankNiftyPrice(price) {
 }
 
 function updateNiftyPrice(price) {
+    const previousPrice = niftyPrice;
     niftyPrice = price;
     document.getElementById('niftyCurrentPriceDisplay').textContent = `₹${price.toFixed(2)}`;
     document.getElementById('niftyPriceUpdateTime').textContent = `Last updated: ${new Date().toLocaleTimeString()}`;
     
+    // Check for level breaches
+    checkNiftyLevelBreaches(price, previousPrice);
+    
     // Update all nifty level displays
     for (let i = 1; i <= 3; i++) {
         updateNiftyLevelDisplay(i);
+    }
+}
+
+// Level breach detection functions
+function checkBankLevelBreaches(currentPrice, previousPrice) {
+    for (let i = 1; i <= 3; i++) {
+        if (bankLevels[i] !== null) {
+            const level = bankLevels[i];
+            const breach = checkLevelBreach(currentPrice, previousPrice, level);
+            
+            if (breach.breached) {
+                showBreachNotification('Bank Nifty', i, level, currentPrice, breach.direction);
+                updateBankLevelBreachStatus(i, breach);
+            } else {
+                updateBankLevelBreachStatus(i, { breached: false });
+            }
+        }
+    }
+}
+
+function checkNiftyLevelBreaches(currentPrice, previousPrice) {
+    for (let i = 1; i <= 3; i++) {
+        if (niftyLevels[i] !== null) {
+            const level = niftyLevels[i];
+            const breach = checkLevelBreach(currentPrice, previousPrice, level);
+            
+            if (breach.breached) {
+                showBreachNotification('Nifty 50', i, level, currentPrice, breach.direction);
+                updateNiftyLevelBreachStatus(i, breach);
+            } else {
+                updateNiftyLevelBreachStatus(i, { breached: false });
+            }
+        }
+    }
+}
+
+function checkLevelBreach(currentPrice, previousPrice, level) {
+    if (!previousPrice || previousPrice === 0) {
+        // No previous price data, can't determine crossing
+        return { breached: false, direction: null };
+    }
+    
+    // Check if price crossed the level
+    const wasAbove = previousPrice > level;
+    const isAbove = currentPrice > level;
+    const wasBelow = previousPrice < level;
+    const isBelow = currentPrice < level;
+    
+    // Determine if there was a crossing
+    if (wasAbove && isBelow) {
+        // Price crossed down through the level
+        return { breached: true, direction: 'down' };
+    } else if (wasBelow && isAbove) {
+        // Price crossed up through the level
+        return { breached: true, direction: 'up' };
+    } else if (Math.abs(currentPrice - level) <= 0.01) {
+        // Price is exactly at the level (within 0.01 tolerance)
+        return { breached: true, direction: 'at_level' };
+    }
+    
+    return { breached: false, direction: null };
+}
+
+function showBreachNotification(indexName, levelNumber, level, currentPrice, direction) {
+    const directionText = direction === 'up' ? 'UP' : direction === 'down' ? 'DOWN' : 'AT';
+    const directionColor = direction === 'up' ? 'text-success' : direction === 'down' ? 'text-error' : 'text-warning';
+    
+    console.log(`🚨 BREACH DETECTED: ${indexName} Level ${levelNumber} (₹${level.toFixed(2)}) crossed ${directionText} at ₹${currentPrice.toFixed(2)}`);
+    
+    // Create a visual notification
+    const notification = document.createElement('div');
+    notification.className = `alert alert-${direction === 'up' ? 'success' : direction === 'down' ? 'error' : 'warning'} mb-2`;
+    notification.innerHTML = `
+        <div class="flex items-center">
+            <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z"></path>
+            </svg>
+            <div>
+                <div class="font-semibold">${indexName} Level ${levelNumber} Breached!</div>
+                <div class="text-sm">Level: ₹${level.toFixed(2)} | Price: ₹${currentPrice.toFixed(2)} | Direction: <span class="${directionColor} font-bold">${directionText}</span></div>
+            </div>
+        </div>
+    `;
+    
+    // Add to alerts section or create a notifications area
+    const alertsSection = document.querySelector('.card-body');
+    if (alertsSection) {
+        alertsSection.insertBefore(notification, alertsSection.firstChild);
+        
+        // Auto-remove after 10 seconds
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.remove();
+            }
+        }, 10000);
+    }
+}
+
+function updateBankLevelBreachStatus(levelNumber, breach) {
+    const statusElement = document.getElementById(`bankLevel${levelNumber}Status`);
+    const distanceElement = document.getElementById(`bankLevel${levelNumber}Distance`);
+    
+    if (breach.breached) {
+        const directionIcon = breach.direction === 'up' ? '↗️' : breach.direction === 'down' ? '↘️' : '⚡';
+        const directionColor = breach.direction === 'up' ? 'text-success' : breach.direction === 'down' ? 'text-error' : 'text-warning';
+        
+        statusElement.innerHTML = `${directionIcon} BREACHED`;
+        statusElement.className = `text-xs ${directionColor} font-bold animate-pulse`;
+        
+        distanceElement.textContent = `Direction: ${breach.direction.toUpperCase()}`;
+        distanceElement.className = `text-xs ${directionColor} font-semibold`;
+    } else {
+        // Reset to normal display
+        updateBankLevelDisplay(levelNumber);
+    }
+}
+
+function updateNiftyLevelBreachStatus(levelNumber, breach) {
+    const statusElement = document.getElementById(`niftyLevel${levelNumber}Status`);
+    const distanceElement = document.getElementById(`niftyLevel${levelNumber}Distance`);
+    
+    if (breach.breached) {
+        const directionIcon = breach.direction === 'up' ? '↗️' : breach.direction === 'down' ? '↘️' : '⚡';
+        const directionColor = breach.direction === 'up' ? 'text-success' : breach.direction === 'down' ? 'text-error' : 'text-warning';
+        
+        statusElement.innerHTML = `${directionIcon} BREACHED`;
+        statusElement.className = `text-xs ${directionColor} font-bold animate-pulse`;
+        
+        distanceElement.textContent = `Direction: ${breach.direction.toUpperCase()}`;
+        distanceElement.className = `text-xs ${directionColor} font-semibold`;
+    } else {
+        // Reset to normal display
+        updateNiftyLevelDisplay(levelNumber);
     }
 }
 
