@@ -371,12 +371,25 @@ def login():
             # Generate login URL
             login_url = kite.login_url()
             
+            # Extract redirect token from login URL if present
+            redirect_token = None
+            try:
+                from urllib.parse import urlparse, parse_qs
+                parsed_url = urlparse(login_url)
+                query_params = parse_qs(parsed_url.query)
+                # The redirect token might be in various parameters
+                redirect_token = query_params.get('redirect_token') or query_params.get('request_token') or query_params.get('token')
+                if redirect_token:
+                    redirect_token = redirect_token[0] if isinstance(redirect_token, list) else redirect_token
+            except:
+                pass
+            
             # Store in session for callback
             session['api_key'] = api_key
             session['api_secret'] = api_secret
             
             flash('Credentials saved! Please complete the login process.', 'success')
-            return render_template('login.html', login_url=login_url, api_key=api_key)
+            return render_template('login.html', login_url=login_url, api_key=api_key, redirect_token=redirect_token)
             
         except Exception as e:
             flash(f'Error initializing KiteConnect: {str(e)}', 'error')
@@ -410,8 +423,9 @@ def login_callback():
         data = kite.generate_session(request_token, api_secret=api_secret)
         access_token = data["access_token"]
         
-        # Save access token in session
+        # Save access token and request token in session
         session["access_token"] = access_token
+        session["request_token"] = request_token  # Store request token for display
         kite.set_access_token(access_token)
         
         # Save to file for persistence
@@ -457,7 +471,11 @@ def prices():
             }
         }
         
-        return render_template('prices.html', prices=prices_data)
+        # Get Zerodha tokens from session if available
+        access_token = session.get('access_token')
+        request_token = session.get('request_token')
+        
+        return render_template('prices.html', prices=prices_data, access_token=access_token, request_token=request_token)
         
     except Exception as e:
         flash(f'Error fetching stock prices: {str(e)}', 'error')
@@ -987,20 +1005,20 @@ def get_three_level_by_uuid_endpoint(level_uuid):
         return jsonify({'error': f'Error getting level: {str(e)}', 'success': False}), 500
 
 @app.route('/three-levels/delete/<uuid>', methods=['DELETE'])
-def delete_three_level_endpoint(level_uuid):
+def delete_three_level_endpoint(uuid):
     """API endpoint to delete a three level by UUID"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
         # Check if level exists
-        cursor.execute('SELECT uuid FROM three_levels WHERE uuid = ?', (level_uuid,))
+        cursor.execute('SELECT uuid FROM three_levels WHERE uuid = ?', (uuid,))
         if not cursor.fetchone():
             conn.close()
             return jsonify({'error': 'Level not found', 'success': False}), 404
         
         # Delete the level
-        cursor.execute('DELETE FROM three_levels WHERE uuid = ?', (level_uuid,))
+        cursor.execute('DELETE FROM three_levels WHERE uuid = ?', (uuid,))
         conn.commit()
         conn.close()
         
@@ -1389,7 +1407,7 @@ if __name__ == '__main__':
         len(sys.argv) > 1 and any('debug' in arg.lower() for arg in sys.argv)
     )
     
-    port = 5002
+    port = 5001
     
     # Set environment variables to prevent multiple processes during debugging
     os.environ['FLASK_ENV'] = 'development'

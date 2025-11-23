@@ -22,6 +22,30 @@
     {% endif %}
 {% endwith %}
 
+{% if access_token %}
+<div class="card bg-base-100 shadow-xl mb-6">
+    <div class="card-body">
+        <h2 class="card-title text-lg mb-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+            </svg>
+            Zerodha Access Token
+        </h2>
+        <div class="bg-base-200 rounded-lg p-4">
+            <code class="text-sm break-all">{{ access_token }}</code>
+        </div>
+        {% if request_token %}
+        <div class="mt-4">
+            <h3 class="text-sm font-semibold mb-2">Request Token:</h3>
+            <div class="bg-base-200 rounded-lg p-4">
+                <code class="text-sm break-all">{{ request_token }}</code>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 {% if prices %}
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
     <div class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow">
@@ -113,6 +137,11 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
                     </button>
+                    <button class="btn btn-error btn-sm px-3" onclick="deleteNiftyLevel(1)" id="niftyLevel1DeleteBtn" style="display: none;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
                     <div class="flex-1 min-w-0">
                         <div class="text-xs text-gray-600 truncate" id="niftyLevel1Status">Not set</div>
                         <div class="text-xs text-gray-500 truncate" id="niftyLevel1Distance"></div>
@@ -129,6 +158,11 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
                     </button>
+                    <button class="btn btn-error btn-sm px-3" onclick="deleteNiftyLevel(2)" id="niftyLevel2DeleteBtn" style="display: none;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
                     <div class="flex-1 min-w-0">
                         <div class="text-xs text-gray-600 truncate" id="niftyLevel2Status">Not set</div>
                         <div class="text-xs text-gray-500 truncate" id="niftyLevel2Distance"></div>
@@ -143,6 +177,11 @@
                     <button class="btn btn-primary btn-sm px-3" onclick="setNiftyLevel(3)">
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </button>
+                    <button class="btn btn-error btn-sm px-3" onclick="deleteNiftyLevel(3)" id="niftyLevel3DeleteBtn" style="display: none;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                         </svg>
                     </button>
                     <div class="flex-1 min-w-0">
@@ -176,6 +215,11 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
                     </button>
+                    <button class="btn btn-error btn-sm px-3" onclick="deleteBankLevel(1)" id="bankLevel1DeleteBtn" style="display: none;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
                     <div class="flex-1 min-w-0">
                         <div class="text-xs text-gray-600 truncate" id="bankLevel1Status">Not set</div>
                         <div class="text-xs text-gray-500 truncate" id="bankLevel1Distance"></div>
@@ -192,6 +236,11 @@
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
                         </svg>
                     </button>
+                    <button class="btn btn-error btn-sm px-3" onclick="deleteBankLevel(2)" id="bankLevel2DeleteBtn" style="display: none;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
                     <div class="flex-1 min-w-0">
                         <div class="text-xs text-gray-600 truncate" id="bankLevel2Status">Not set</div>
                         <div class="text-xs text-gray-500 truncate" id="bankLevel2Distance"></div>
@@ -206,6 +255,11 @@
                     <button class="btn btn-primary btn-sm px-3" onclick="setBankLevel(3)">
                         <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </button>
+                    <button class="btn btn-error btn-sm px-3" onclick="deleteBankLevel(3)" id="bankLevel3DeleteBtn" style="display: none;">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
                         </svg>
                     </button>
                     <div class="flex-1 min-w-0">
@@ -1182,6 +1236,19 @@ let niftyLevels = {
     3: null
 };
 
+// Store UUIDs for levels to enable deletion
+let bankLevelUuids = {
+    1: null,
+    2: null,
+    3: null
+};
+
+let niftyLevelUuids = {
+    1: null,
+    2: null,
+    3: null
+};
+
 // Bank Nifty Functions
 function setBankLevel(levelNumber) {
     const input = document.getElementById(`bankLevel${levelNumber}`);
@@ -1204,10 +1271,16 @@ function setBankLevel(levelNumber) {
 function updateBankLevelDisplay(levelNumber) {
     const statusElement = document.getElementById(`bankLevel${levelNumber}Status`);
     const distanceElement = document.getElementById(`bankLevel${levelNumber}Distance`);
+    const deleteBtn = document.getElementById(`bankLevel${levelNumber}DeleteBtn`);
     
     if (bankLevels[levelNumber] !== null) {
         statusElement.textContent = `₹${bankLevels[levelNumber].toFixed(2)}`;
         statusElement.className = 'text-xs text-success font-semibold';
+        
+        // Show delete button when level is set
+        if (deleteBtn) {
+            deleteBtn.style.display = 'block';
+        }
         
         if (bankNiftyPrice > 0) {
             const distance = Math.abs(bankNiftyPrice - bankLevels[levelNumber]);
@@ -1227,6 +1300,57 @@ function updateBankLevelDisplay(levelNumber) {
         statusElement.textContent = 'Not set';
         statusElement.className = 'text-xs text-gray-600';
         distanceElement.textContent = '';
+        
+        // Hide delete button when level is not set
+        if (deleteBtn) {
+            deleteBtn.style.display = 'none';
+        }
+    }
+}
+
+function deleteBankLevel(levelNumber) {
+    if (!bankLevelUuids[levelNumber]) {
+        alert('No level to delete for Bank Nifty Level ' + levelNumber);
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to delete Bank Nifty Level ${levelNumber} (₹${bankLevels[levelNumber].toFixed(2)})?`)) {
+        // Show loading state
+        const deleteBtn = document.getElementById(`bankLevel${levelNumber}DeleteBtn`);
+        const originalContent = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>';
+        deleteBtn.disabled = true;
+        
+        // Call delete API
+        fetch(`/three-levels/delete/${bankLevelUuids[levelNumber]}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Clear the level locally
+                bankLevels[levelNumber] = null;
+                bankLevelUuids[levelNumber] = null;
+                document.getElementById(`bankLevel${levelNumber}`).value = '';
+                updateBankLevelDisplay(levelNumber);
+                console.log(`Bank Nifty Level ${levelNumber} deleted successfully`);
+            } else {
+                alert('Error deleting level: ' + (data.error || 'Unknown error'));
+                // Reset button state
+                deleteBtn.innerHTML = originalContent;
+                deleteBtn.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error deleting level: ' + error.message);
+            // Reset button state
+            deleteBtn.innerHTML = originalContent;
+            deleteBtn.disabled = false;
+        });
     }
 }
 
@@ -1252,10 +1376,16 @@ function setNiftyLevel(levelNumber) {
 function updateNiftyLevelDisplay(levelNumber) {
     const statusElement = document.getElementById(`niftyLevel${levelNumber}Status`);
     const distanceElement = document.getElementById(`niftyLevel${levelNumber}Distance`);
+    const deleteBtn = document.getElementById(`niftyLevel${levelNumber}DeleteBtn`);
     
     if (niftyLevels[levelNumber] !== null) {
         statusElement.textContent = `₹${niftyLevels[levelNumber].toFixed(2)}`;
         statusElement.className = 'text-xs text-success font-semibold';
+        
+        // Show delete button when level is set
+        if (deleteBtn) {
+            deleteBtn.style.display = 'block';
+        }
         
         if (niftyPrice > 0) {
             const distance = Math.abs(niftyPrice - niftyLevels[levelNumber]);
@@ -1275,6 +1405,57 @@ function updateNiftyLevelDisplay(levelNumber) {
         statusElement.textContent = 'Not set';
         statusElement.className = 'text-xs text-gray-600';
         distanceElement.textContent = '';
+        
+        // Hide delete button when level is not set
+        if (deleteBtn) {
+            deleteBtn.style.display = 'none';
+        }
+    }
+}
+
+function deleteNiftyLevel(levelNumber) {
+    if (!niftyLevelUuids[levelNumber]) {
+        alert('No level to delete for Nifty Level ' + levelNumber);
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to delete Nifty Level ${levelNumber} (₹${niftyLevels[levelNumber].toFixed(2)})?`)) {
+        // Show loading state
+        const deleteBtn = document.getElementById(`niftyLevel${levelNumber}DeleteBtn`);
+        const originalContent = deleteBtn.innerHTML;
+        deleteBtn.innerHTML = '<svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>';
+        deleteBtn.disabled = true;
+        
+        // Call delete API
+        fetch(`/three-levels/delete/${niftyLevelUuids[levelNumber]}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                // Clear the level locally
+                niftyLevels[levelNumber] = null;
+                niftyLevelUuids[levelNumber] = null;
+                document.getElementById(`niftyLevel${levelNumber}`).value = '';
+                updateNiftyLevelDisplay(levelNumber);
+                console.log(`Nifty Level ${levelNumber} deleted successfully`);
+            } else {
+                alert('Error deleting level: ' + (data.error || 'Unknown error'));
+                // Reset button state
+                deleteBtn.innerHTML = originalContent;
+                deleteBtn.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error deleting level: ' + error.message);
+            // Reset button state
+            deleteBtn.innerHTML = originalContent;
+            deleteBtn.disabled = false;
+        });
     }
 }
 
@@ -1458,9 +1639,14 @@ function saveLevelToDatabase(indexType, levelNumber, levelValue) {
     .then(data => {
         if (data.success) {
             console.log(`Level saved: ${indexType} Level ${levelNumber} = ${levelValue}`);
-            // Store the UUID for future reference if needed
+            // Store the UUID for future reference and deletion
             if (data.uuid) {
                 console.log(`Level UUID: ${data.uuid}`);
+                if (indexType === 'BANK_NIFTY') {
+                    bankLevelUuids[levelNumber] = data.uuid;
+                } else if (indexType === 'NIFTY_50') {
+                    niftyLevelUuids[levelNumber] = data.uuid;
+                }
             }
         } else {
             console.error('Error saving level:', data.error);
@@ -1481,6 +1667,7 @@ function loadLevelsFromDatabase() {
                     for (let i = 1; i <= 3; i++) {
                         if (data.levels.BANK_NIFTY[i] && data.levels.BANK_NIFTY[i].value) {
                             bankLevels[i] = data.levels.BANK_NIFTY[i].value;
+                            bankLevelUuids[i] = data.levels.BANK_NIFTY[i].uuid;
                             document.getElementById(`bankLevel${i}`).value = data.levels.BANK_NIFTY[i].value;
                             updateBankLevelDisplay(i);
                         }
@@ -1492,6 +1679,7 @@ function loadLevelsFromDatabase() {
                     for (let i = 1; i <= 3; i++) {
                         if (data.levels.NIFTY_50[i] && data.levels.NIFTY_50[i].value) {
                             niftyLevels[i] = data.levels.NIFTY_50[i].value;
+                            niftyLevelUuids[i] = data.levels.NIFTY_50[i].uuid;
                             document.getElementById(`niftyLevel${i}`).value = data.levels.NIFTY_50[i].value;
                             updateNiftyLevelDisplay(i);
                         }
