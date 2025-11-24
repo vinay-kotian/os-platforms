@@ -75,9 +75,9 @@ def init_database():
         except:
             pass  # Column already exists
         
-        # Create three_levels table
+        # Create level table
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS three_levels (
+            CREATE TABLE IF NOT EXISTS level (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 uuid TEXT UNIQUE NOT NULL,
                 user_id TEXT NOT NULL,
@@ -97,8 +97,8 @@ def init_database():
     except Exception as e:
         print(f"Error initializing database: {e}")
 
-def save_three_level(user_id, index_type, level_number, level_value):
-    """Save a three level to the database"""
+def save_level(user_id, index_type, level_number, level_value):
+    """Save a level to the database"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
@@ -107,7 +107,7 @@ def save_three_level(user_id, index_type, level_number, level_value):
         
         # Check if level already exists to get existing UUID or create new one
         cursor.execute('''
-            SELECT uuid FROM three_levels 
+            SELECT uuid FROM level 
             WHERE user_id = ? AND index_type = ? AND level_number = ?
         ''', (user_id, index_type, level_number))
         
@@ -116,28 +116,28 @@ def save_three_level(user_id, index_type, level_number, level_value):
         
         # Insert or update the level with UUID
         cursor.execute('''
-            INSERT OR REPLACE INTO three_levels 
+            INSERT OR REPLACE INTO level 
             (uuid, user_id, index_type, level_number, level_value, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         ''', (level_uuid, user_id, index_type, level_number, level_value, current_time, current_time))
         
         conn.commit()
         conn.close()
-        print(f"Three level saved with UUID: {level_uuid}")
+        print(f"Level saved with UUID: {level_uuid}")
         return True
     except Exception as e:
-        print(f"Error saving three level: {e}")
+        print(f"Error saving level: {e}")
         return False
 
-def get_three_levels(user_id):
-    """Get all three levels for a user"""
+def get_levels(user_id):
+    """Get all levels for a user"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
         cursor.execute('''
             SELECT uuid, index_type, level_number, level_value, updated_at
-            FROM three_levels 
+            FROM level 
             WHERE user_id = ?
             ORDER BY index_type, level_number
         ''', (user_id,))
@@ -161,7 +161,7 @@ def get_three_levels(user_id):
         
         return levels
     except Exception as e:
-        print(f"Error getting three levels: {e}")
+        print(f"Error getting levels: {e}")
         return {
             'BANK_NIFTY': {1: None, 2: None, 3: None},
             'NIFTY_50': {1: None, 2: None, 3: None}
@@ -1015,9 +1015,9 @@ def debug_auth():
     
         return jsonify(debug_info)
 
-@app.route('/three-levels/save', methods=['POST'])
-def save_three_level_endpoint():
-    """API endpoint to save a three level"""
+@app.route('/levels/save', methods=['POST'])
+def save_level_endpoint():
+    """API endpoint to save a level"""
     try:
         data = request.get_json()
         index_type = data.get('index_type')  # 'BANK_NIFTY' or 'NIFTY_50'
@@ -1036,7 +1036,7 @@ def save_three_level_endpoint():
         # Use a default user_id for now (you can modify this based on your auth system)
         user_id = 'default_user'
         
-        success = save_three_level(user_id, index_type, level_number, level_value)
+        success = save_level(user_id, index_type, level_number, level_value)
         
         if success:
             # Get the UUID of the saved level
@@ -1044,7 +1044,7 @@ def save_three_level_endpoint():
                 conn = sqlite3.connect(DATABASE_FILE)
                 cursor = conn.cursor()
                 cursor.execute('''
-                    SELECT uuid FROM three_levels 
+                    SELECT uuid FROM level 
                     WHERE user_id = ? AND index_type = ? AND level_number = ?
                 ''', (user_id, index_type, level_number))
                 result = cursor.fetchone()
@@ -1067,29 +1067,29 @@ def save_three_level_endpoint():
     except Exception as e:
         return jsonify({'error': f'Error saving level: {str(e)}', 'success': False}), 500
 
-@app.route('/three-levels/get', methods=['GET'])
-def get_three_levels_endpoint():
-    """API endpoint to get all three levels"""
+@app.route('/levels/get', methods=['GET'])
+def get_levels_endpoint():
+    """API endpoint to get all levels"""
     try:
         # Use a default user_id for now (you can modify this based on your auth system)
         user_id = 'default_user'
         
-        levels = get_three_levels(user_id)
+        levels = get_levels(user_id)
         return jsonify({'levels': levels, 'success': True}), 200
         
     except Exception as e:
         return jsonify({'error': f'Error getting levels: {str(e)}', 'success': False}), 500
 
-@app.route('/three-levels/get/<uuid>', methods=['GET'])
-def get_three_level_by_uuid_endpoint(level_uuid):
-    """API endpoint to get a specific three level by UUID"""
+@app.route('/levels/get/<uuid>', methods=['GET'])
+def get_level_by_uuid_endpoint(level_uuid):
+    """API endpoint to get a specific level by UUID"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
         cursor.execute('''
             SELECT uuid, user_id, index_type, level_number, level_value, created_at, updated_at
-            FROM three_levels 
+            FROM level 
             WHERE uuid = ?
         ''', (level_uuid,))
         
@@ -1116,21 +1116,21 @@ def get_three_level_by_uuid_endpoint(level_uuid):
     except Exception as e:
         return jsonify({'error': f'Error getting level: {str(e)}', 'success': False}), 500
 
-@app.route('/three-levels/delete/<uuid>', methods=['DELETE'])
-def delete_three_level_endpoint(uuid):
-    """API endpoint to delete a three level by UUID"""
+@app.route('/levels/delete/<uuid>', methods=['DELETE'])
+def delete_level_endpoint(uuid):
+    """API endpoint to delete a level by UUID"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
         # Check if level exists
-        cursor.execute('SELECT uuid FROM three_levels WHERE uuid = ?', (uuid,))
+        cursor.execute('SELECT uuid FROM level WHERE uuid = ?', (uuid,))
         if not cursor.fetchone():
             conn.close()
             return jsonify({'error': 'Level not found', 'success': False}), 404
         
         # Delete the level
-        cursor.execute('DELETE FROM three_levels WHERE uuid = ?', (uuid,))
+        cursor.execute('DELETE FROM level WHERE uuid = ?', (uuid,))
         conn.commit()
         conn.close()
         
@@ -1898,7 +1898,7 @@ if __name__ == '__main__':
     use_reloader = not is_debugging
     
     print(f"🚀 Starting Flask app on port {port}")
-    print("📊 Three levels database storage enabled")
+    print("📊 Levels database storage enabled")
     print("🔌 Continuous WebSocket streaming enabled")
     print(f"🔧 Debug mode: {'ON' if is_debugging else 'OFF'}")
     print(f"🔄 Auto-reloader: {'OFF' if not use_reloader else 'ON'}")

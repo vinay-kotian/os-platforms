@@ -7,7 +7,7 @@ import os
 # Add the current directory to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from app import get_three_levels
+from app import get_levels
 
 def test_level_retrieval():
     """Test the level retrieval functionality"""
@@ -15,9 +15,9 @@ def test_level_retrieval():
     print("=" * 50)
     
     try:
-        # Test the get_three_levels function directly
+        # Test the get_levels function directly
         user_id = 'default_user'
-        levels = get_three_levels(user_id)
+        levels = get_levels(user_id)
         
         print(f"✅ Function executed successfully")
         print(f"📊 Retrieved levels: {levels}")

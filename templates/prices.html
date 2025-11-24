@@ -668,7 +668,7 @@ function deleteBankLevel(levelNumber) {
         deleteBtn.disabled = true;
         
         // Call delete API
-        fetch(`/three-levels/delete/${bankLevelUuids[levelNumber]}`, {
+        fetch(`/levels/delete/${bankLevelUuids[levelNumber]}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -773,7 +773,7 @@ function deleteNiftyLevel(levelNumber) {
         deleteBtn.disabled = true;
         
         // Call delete API
-        fetch(`/three-levels/delete/${niftyLevelUuids[levelNumber]}`, {
+        fetch(`/levels/delete/${niftyLevelUuids[levelNumber]}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -970,7 +970,7 @@ function updateNiftyLevelBreachStatus(levelNumber, breach) {
 
 // Database functions for three levels
 function saveLevelToDatabase(indexType, levelNumber, levelValue) {
-    fetch('/three-levels/save', {
+    fetch('/levels/save', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1004,7 +1004,7 @@ function saveLevelToDatabase(indexType, levelNumber, levelValue) {
 }
 
 function loadLevelsFromDatabase() {
-    fetch('/three-levels/get')
+    fetch('/levels/get')
         .then(response => response.json())
         .then(data => {
             if (data.success && data.levels) {
