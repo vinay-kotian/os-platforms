@@ -82,13 +82,55 @@ def init_database():
                 uuid TEXT UNIQUE NOT NULL,
                 user_id TEXT NOT NULL,
                 index_type TEXT NOT NULL,  -- 'BANK_NIFTY' or 'NIFTY_50'
-                level_number INTEGER NOT NULL,  -- 1, 2, or 3
                 level_value REAL NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                UNIQUE(user_id, index_type, level_number)
+                created_date TEXT NOT NULL  -- Date when level was created (for daily refresh)
             )
         ''')
+        
+        # Migration: Handle schema changes for existing databases
+        try:
+            cursor.execute('PRAGMA table_info(level)')
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            # Check if level_number column exists (old schema)
+            if 'level_number' in columns:
+                print("Migrating level table: removing level_number column...")
+                # Create new table without level_number
+                cursor.execute('''
+                    CREATE TABLE level_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        uuid TEXT UNIQUE NOT NULL,
+                        user_id TEXT NOT NULL,
+                        index_type TEXT NOT NULL,
+                        level_value REAL NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        created_date TEXT NOT NULL
+                    )
+                ''')
+                # Copy data (excluding level_number)
+                cursor.execute('''
+                    INSERT INTO level_new (id, uuid, user_id, index_type, level_value, created_at, updated_at, created_date)
+                    SELECT id, uuid, user_id, index_type, level_value, created_at, updated_at, 
+                           COALESCE(created_date, date('now'))
+                    FROM level
+                ''')
+                cursor.execute('DROP TABLE level')
+                cursor.execute('ALTER TABLE level_new RENAME TO level')
+                conn.commit()
+                print("Migration completed: removed level_number column")
+            
+            # Add created_date column if it doesn't exist
+            if 'created_date' not in columns:
+                cursor.execute('ALTER TABLE level ADD COLUMN created_date TEXT')
+                # Set created_date for existing records
+                cursor.execute('UPDATE level SET created_date = date(created_at) WHERE created_date IS NULL OR created_date = ""')
+                conn.commit()
+                print("Added created_date column to level table")
+        except Exception as e:
+            print(f"Migration check completed (or not needed): {e}")
         
         conn.commit()
         conn.close()
@@ -97,75 +139,168 @@ def init_database():
     except Exception as e:
         print(f"Error initializing database: {e}")
 
-def save_level(user_id, index_type, level_number, level_value):
-    """Save a level to the database"""
+def save_level(user_id, index_type, level_value, level_uuid=None):
+    """Save a level to the database (allows dynamic levels, not just 1-3)"""
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
         current_time = datetime.now().isoformat()
+        current_date = datetime.now().date().isoformat()  # Date for daily refresh
         
-        # Check if level already exists to get existing UUID or create new one
-        cursor.execute('''
-            SELECT uuid FROM level 
-            WHERE user_id = ? AND index_type = ? AND level_number = ?
-        ''', (user_id, index_type, level_number))
-        
-        existing_level = cursor.fetchone()
-        level_uuid = existing_level[0] if existing_level else str(uuid.uuid4())
-        
-        # Insert or update the level with UUID
-        cursor.execute('''
-            INSERT OR REPLACE INTO level 
-            (uuid, user_id, index_type, level_number, level_value, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        ''', (level_uuid, user_id, index_type, level_number, level_value, current_time, current_time))
+        # If UUID provided, update existing level; otherwise create new one
+        if level_uuid:
+            cursor.execute('''
+                SELECT uuid FROM level 
+                WHERE uuid = ? AND user_id = ?
+            ''', (level_uuid, user_id))
+            
+            if cursor.fetchone():
+                # Update existing level
+                cursor.execute('''
+                    UPDATE level 
+                    SET level_value = ?, updated_at = ?
+                    WHERE uuid = ? AND user_id = ?
+                ''', (level_value, current_time, level_uuid, user_id))
+            else:
+                return False  # UUID not found
+        else:
+            # Create new level
+            level_uuid = str(uuid.uuid4())
+            cursor.execute('''
+                INSERT INTO level 
+                (uuid, user_id, index_type, level_value, created_at, updated_at, created_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (level_uuid, user_id, index_type, level_value, current_time, current_time, current_date))
         
         conn.commit()
         conn.close()
         print(f"Level saved with UUID: {level_uuid}")
-        return True
+        return level_uuid
     except Exception as e:
         print(f"Error saving level: {e}")
-        return False
+        return None
 
-def get_levels(user_id):
-    """Get all levels for a user"""
+def get_levels(user_id, index_type=None, today_only=False):
+    """Get all levels for a user (returns as list, not fixed 1-3 structure)
+    
+    Args:
+        user_id: User ID
+        index_type: Optional filter by index type ('BANK_NIFTY' or 'NIFTY_50')
+        today_only: If True, only return levels created today
+    """
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
         
-        cursor.execute('''
-            SELECT uuid, index_type, level_number, level_value, updated_at
-            FROM level 
-            WHERE user_id = ?
-            ORDER BY index_type, level_number
-        ''', (user_id,))
+        today = datetime.now().date().isoformat()
+        
+        if index_type:
+            if today_only:
+                cursor.execute('''
+                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    FROM level 
+                    WHERE user_id = ? AND index_type = ? AND created_date = ?
+                    ORDER BY level_value DESC
+                ''', (user_id, index_type, today))
+            else:
+                cursor.execute('''
+                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    FROM level 
+                    WHERE user_id = ? AND index_type = ?
+                    ORDER BY level_value DESC
+                ''', (user_id, index_type))
+        else:
+            if today_only:
+                cursor.execute('''
+                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    FROM level 
+                    WHERE user_id = ? AND created_date = ?
+                    ORDER BY index_type, level_value DESC
+                ''', (user_id, today))
+            else:
+                cursor.execute('''
+                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    FROM level 
+                    WHERE user_id = ?
+                    ORDER BY index_type, level_value DESC
+                ''', (user_id,))
         
         results = cursor.fetchall()
         conn.close()
         
-        # Convert to dictionary format
+        # Convert to dictionary format with lists instead of fixed 1-3 structure
         levels = {
-            'BANK_NIFTY': {1: None, 2: None, 3: None},
-            'NIFTY_50': {1: None, 2: None, 3: None}
+            'BANK_NIFTY': [],
+            'NIFTY_50': []
         }
         
         for row in results:
-            level_uuid, index_type, level_number, level_value, updated_at = row
-            levels[index_type][level_number] = {
+            level_uuid, idx_type, level_value, updated_at, created_date = row
+            levels[idx_type].append({
                 'uuid': level_uuid,
                 'value': level_value,
-                'updated_at': updated_at
-            }
+                'updated_at': updated_at,
+                'created_date': created_date
+            })
         
         return levels
     except Exception as e:
         print(f"Error getting levels: {e}")
         return {
-            'BANK_NIFTY': {1: None, 2: None, 3: None},
-            'NIFTY_50': {1: None, 2: None, 3: None}
+            'BANK_NIFTY': [],
+            'NIFTY_50': []
         }
+
+def clear_levels_for_today(user_id):
+    """Clear all levels created today (for daily refresh)"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        today = datetime.now().date().isoformat()
+        
+        cursor.execute('''
+            DELETE FROM level 
+            WHERE user_id = ? AND created_date = ?
+        ''', (user_id, today))
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        print(f"Cleared {deleted_count} levels for today")
+        return deleted_count
+    except Exception as e:
+        print(f"Error clearing levels for today: {e}")
+        return 0
+
+def clear_all_levels(user_id, index_type=None):
+    """Clear all levels for a user (or specific index type)"""
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        if index_type:
+            cursor.execute('''
+                DELETE FROM level 
+                WHERE user_id = ? AND index_type = ?
+            ''', (user_id, index_type))
+        else:
+            cursor.execute('''
+                DELETE FROM level 
+                WHERE user_id = ?
+            ''', (user_id,))
+        
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        print(f"Cleared {deleted_count} levels")
+        return deleted_count
+    except Exception as e:
+        print(f"Error clearing levels: {e}")
+        return 0
 
 def store_alert_response(alert_data, kite_response):
     """Store alert response in database"""
@@ -1017,50 +1152,33 @@ def debug_auth():
 
 @app.route('/levels/save', methods=['POST'])
 def save_level_endpoint():
-    """API endpoint to save a level"""
+    """API endpoint to save a level (supports dynamic levels)"""
     try:
         data = request.get_json()
         index_type = data.get('index_type')  # 'BANK_NIFTY' or 'NIFTY_50'
-        level_number = data.get('level_number')  # 1, 2, or 3
         level_value = data.get('level_value')
+        level_uuid = data.get('uuid')  # Optional: for updating existing level
         
-        if not all([index_type, level_number, level_value]):
-            return jsonify({'error': 'Missing required fields', 'success': False}), 400
+        if not all([index_type, level_value]):
+            return jsonify({'error': 'Missing required fields (index_type, level_value)', 'success': False}), 400
         
         if index_type not in ['BANK_NIFTY', 'NIFTY_50']:
-            return jsonify({'error': 'Invalid index_type', 'success': False}), 400
+            return jsonify({'error': 'Invalid index_type. Must be BANK_NIFTY or NIFTY_50', 'success': False}), 400
         
-        if level_number not in [1, 2, 3]:
-            return jsonify({'error': 'Invalid level_number', 'success': False}), 400
+        if not isinstance(level_value, (int, float)) or level_value <= 0:
+            return jsonify({'error': 'level_value must be a positive number', 'success': False}), 400
         
         # Use a default user_id for now (you can modify this based on your auth system)
         user_id = 'default_user'
         
-        success = save_level(user_id, index_type, level_number, level_value)
+        result_uuid = save_level(user_id, index_type, level_value, level_uuid)
         
-        if success:
-            # Get the UUID of the saved level
-            try:
-                conn = sqlite3.connect(DATABASE_FILE)
-                cursor = conn.cursor()
-                cursor.execute('''
-                    SELECT uuid FROM level 
-                    WHERE user_id = ? AND index_type = ? AND level_number = ?
-                ''', (user_id, index_type, level_number))
-                result = cursor.fetchone()
-                conn.close()
-                
-                level_uuid = result[0] if result else None
-                return jsonify({
-                    'message': 'Level saved successfully', 
-                    'success': True, 
-                    'uuid': level_uuid
-                }), 200
-            except Exception as e:
-                return jsonify({
-                    'message': 'Level saved successfully', 
-                    'success': True
-                }), 200
+        if result_uuid:
+            return jsonify({
+                'message': 'Level saved successfully', 
+                'success': True, 
+                'uuid': result_uuid
+            }), 200
         else:
             return jsonify({'error': 'Failed to save level', 'success': False}), 500
             
@@ -1073,12 +1191,40 @@ def get_levels_endpoint():
     try:
         # Use a default user_id for now (you can modify this based on your auth system)
         user_id = 'default_user'
+        index_type = request.args.get('index_type')  # Optional filter
+        today_only = request.args.get('today_only', 'false').lower() == 'true'  # Optional filter for today's levels only
         
-        levels = get_levels(user_id)
+        levels = get_levels(user_id, index_type, today_only)
+        print(f"Returning levels: BANK_NIFTY={len(levels['BANK_NIFTY'])}, NIFTY_50={len(levels['NIFTY_50'])}")
         return jsonify({'levels': levels, 'success': True}), 200
         
     except Exception as e:
+        print(f"Error in get_levels_endpoint: {e}")
         return jsonify({'error': f'Error getting levels: {str(e)}', 'success': False}), 500
+
+@app.route('/levels/clear', methods=['POST'])
+def clear_levels_endpoint():
+    """API endpoint to clear levels (for daily refresh)"""
+    try:
+        data = request.get_json() or {}
+        index_type = data.get('index_type')  # Optional: clear specific index type
+        clear_today_only = data.get('today_only', False)  # If True, only clear today's levels
+        
+        user_id = 'default_user'
+        
+        if clear_today_only:
+            deleted_count = clear_levels_for_today(user_id)
+        else:
+            deleted_count = clear_all_levels(user_id, index_type)
+        
+        return jsonify({
+            'message': f'Cleared {deleted_count} level(s)', 
+            'success': True,
+            'deleted_count': deleted_count
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error clearing levels: {str(e)}', 'success': False}), 500
 
 @app.route('/levels/get/<uuid>', methods=['GET'])
 def get_level_by_uuid_endpoint(level_uuid):
@@ -1088,7 +1234,7 @@ def get_level_by_uuid_endpoint(level_uuid):
         cursor = conn.cursor()
         
         cursor.execute('''
-            SELECT uuid, user_id, index_type, level_number, level_value, created_at, updated_at
+            SELECT uuid, user_id, index_type, level_value, created_at, updated_at, created_date
             FROM level 
             WHERE uuid = ?
         ''', (level_uuid,))
@@ -1097,16 +1243,16 @@ def get_level_by_uuid_endpoint(level_uuid):
         conn.close()
         
         if result:
-            level_uuid, user_id, index_type, level_number, level_value, created_at, updated_at = result
+            level_uuid, user_id, index_type, level_value, created_at, updated_at, created_date = result
             return jsonify({
                 'level': {
                     'uuid': level_uuid,
                     'user_id': user_id,
                     'index_type': index_type,
-                    'level_number': level_number,
                     'level_value': level_value,
                     'created_at': created_at,
-                    'updated_at': updated_at
+                    'updated_at': updated_at,
+                    'created_date': created_date
                 },
                 'success': True
             }), 200
