@@ -4,15 +4,19 @@ import requests
 import sqlite3
 import uuid
 from datetime import datetime
-from flask import Flask, redirect, request, session, url_for, render_template, flash
+from flask import Flask, redirect, request, session, url_for, render_template, flash, has_request_context
 from flask.json import jsonify
-from kiteconnect import KiteConnect
+from flask_socketio import SocketIO, emit
+from kiteconnect import KiteConnect, KiteTicker
 import logging
+import threading
+import time
 
 logging.basicConfig(level=logging.DEBUG)
 
 app = Flask(__name__)
 app.secret_key = "thisisasecretkey"   # needed for session handling
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 # File to store persistent session data
 SESSION_FILE = 'session_data.json'
@@ -443,39 +447,99 @@ def prices():
     """Nifty and Bank Nifty prices page"""
     global kite
     
-    # Check if user is logged in
-    if not session.get('access_token') or not kite:
+    # Get credentials from session or file
+    api_key, access_token = get_credentials_from_session_or_file()
+    
+    # Check if user is logged in (either via session or file)
+    if not api_key or not access_token:
         flash('Please login to view live stock prices', 'error')
         return redirect(url_for('login'))
     
+    # Ensure kite is initialized
+    if not kite:
+        try:
+            kite = KiteConnect(api_key=api_key)
+            kite.set_access_token(access_token)
+        except Exception as e:
+            flash(f'Error initializing KiteConnect: {str(e)}', 'error')
+            return render_template('prices.html', prices=None)
+    
     try:
-        # Fetch live prices
-        nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
-        bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+        # Fetch live prices using WebSocket
+        websocket_prices_data = fetch_nifty_prices_websocket(timeout=10)
         
-        # Format the data
-        prices_data = {
-            'nifty': {
-                'name': nifty_data.get('tradingsymbol', 'N/A'),
-                'current_price': nifty_data.get('last_price', 0),
-                'change': nifty_data.get('net_change', 0),
-                'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc').get('close', 0) * 100,
-                'last_updated': nifty_data.get('timestamp', 'N/A')
-            },
-            'bank_nifty': {
-                'name': bank_nifty_data.get('tradingsymbol', 'N/A'),
-                'current_price': bank_nifty_data.get('last_price', 0),
-                'change': bank_nifty_data.get('net_change', 0),
-                'change_percent': bank_nifty_data.get('net_change', 0) / nifty_data.get('ohlc').get('close', 0) * 100,
-                'last_updated': bank_nifty_data.get('timestamp', 'N/A')
+        # Check if we got valid prices
+        nifty_price = websocket_prices_data.get('NIFTY 50', {}).get('last_price', 0)
+        bank_nifty_price = websocket_prices_data.get('NIFTY BANK', {}).get('last_price', 0)
+        
+        # If WebSocket failed, fallback to REST API
+        if nifty_price == 0 or bank_nifty_price == 0:
+            # Fallback to REST API
+            nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+            bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+            
+            prices_data = {
+                'nifty': {
+                    'name': nifty_data.get('tradingsymbol', 'NIFTY 50'),
+                    'current_price': nifty_data.get('last_price', 0),
+                    'change': nifty_data.get('net_change', 0),
+                    'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
+                    'last_updated': nifty_data.get('timestamp', 'N/A')
+                },
+                'bank_nifty': {
+                    'name': bank_nifty_data.get('tradingsymbol', 'NIFTY BANK'),
+                    'current_price': bank_nifty_data.get('last_price', 0),
+                    'change': bank_nifty_data.get('net_change', 0),
+                    'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
+                    'last_updated': bank_nifty_data.get('timestamp', 'N/A')
+                }
             }
-        }
+        else:
+            # Use WebSocket data - need to get additional info from REST API for change/change_percent
+            try:
+                nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+                bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+                
+                prices_data = {
+                    'nifty': {
+                        'name': 'NIFTY 50',
+                        'current_price': nifty_price,
+                        'change': nifty_data.get('net_change', 0),
+                        'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
+                        'last_updated': websocket_prices_data.get('NIFTY 50', {}).get('timestamp', 'N/A')
+                    },
+                    'bank_nifty': {
+                        'name': 'NIFTY BANK',
+                        'current_price': bank_nifty_price,
+                        'change': bank_nifty_data.get('net_change', 0),
+                        'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
+                        'last_updated': websocket_prices_data.get('NIFTY BANK', {}).get('timestamp', 'N/A')
+                    }
+                }
+            except:
+                # If REST API fails, use WebSocket data only
+                prices_data = {
+                    'nifty': {
+                        'name': 'NIFTY 50',
+                        'current_price': nifty_price,
+                        'change': 0,
+                        'change_percent': 0,
+                        'last_updated': websocket_prices_data.get('NIFTY 50', {}).get('timestamp', 'N/A')
+                    },
+                    'bank_nifty': {
+                        'name': 'NIFTY BANK',
+                        'current_price': bank_nifty_price,
+                        'change': 0,
+                        'change_percent': 0,
+                        'last_updated': websocket_prices_data.get('NIFTY BANK', {}).get('timestamp', 'N/A')
+                    }
+                }
         
         # Get Zerodha tokens from session if available
-        access_token = session.get('access_token')
+        access_token_display = session.get('access_token') or access_token
         request_token = session.get('request_token')
         
-        return render_template('prices.html', prices=prices_data, access_token=access_token, request_token=request_token)
+        return render_template('prices.html', prices=prices_data, access_token=access_token_display, request_token=request_token)
         
     except Exception as e:
         flash(f'Error fetching stock prices: {str(e)}', 'error')
@@ -483,40 +547,88 @@ def prices():
 
 @app.route('/stocks/fetch-price')
 def fetch_prices():
-    """API endpoint to fetch current stock prices"""
+    """API endpoint to fetch current stock prices (DEPRECATED - use /stocks/fetch-price-websocket or WebSocket)"""
+    # For backward compatibility, call the WebSocket endpoint function
+    return fetch_prices_websocket()
+
+@app.route('/stocks/fetch-price-websocket', methods=['GET'])
+def fetch_prices_websocket():
+    """API endpoint to fetch current stock prices using WebSocket"""
     global kite
     
-    # Check if user is logged in
-    if not session.get('access_token') or not kite:
-        return jsonify({'error': 'Not authenticated'}), 401
+    # Get credentials from session or file
+    api_key, access_token = get_credentials_from_session_or_file()
+    
+    # Check if user is logged in (either via session or file)
+    if not api_key or not access_token:
+        return jsonify({'error': 'Not authenticated. Please login first at /login'}), 401
+    
+    # Ensure kite is initialized
+    global kite
+    if not kite:
+        try:
+            kite = KiteConnect(api_key=api_key)
+            kite.set_access_token(access_token)
+        except Exception as e:
+            return jsonify({'error': f'Error initializing KiteConnect: {str(e)}'}), 500
     
     try:
-        # Fetch live prices using the same logic as the main prices page
-        nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
-        bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+        # Fetch prices using WebSocket
+        websocket_prices_data = fetch_nifty_prices_websocket(timeout=10)
         
-        # Format the data to match the template structure
-        prices_data = {
-            'nifty': {
-                'name': nifty_data.get('tradingsymbol', 'N/A'),
-                'current_price': nifty_data.get('last_price', 0),
-                'change': nifty_data.get('net_change', 0),
-                'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
-                'last_updated': nifty_data.get('timestamp', 'N/A')
-            },
-            'bank_nifty': {
-                'name': bank_nifty_data.get('tradingsymbol', 'N/A'),
-                'current_price': bank_nifty_data.get('last_price', 0),
-                'change': bank_nifty_data.get('net_change', 0),
-                'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
-                'last_updated': bank_nifty_data.get('timestamp', 'N/A')
+        # Get additional data (change, change_percent) from REST API
+        nifty_price = websocket_prices_data.get('NIFTY 50', {}).get('last_price', 0)
+        bank_nifty_price = websocket_prices_data.get('NIFTY BANK', {}).get('last_price', 0)
+        
+        # Get change data from REST API
+        try:
+            nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+            bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+            
+            # Format the data to match the template structure
+            formatted_data = {
+                'nifty': {
+                    'name': 'NIFTY 50',
+                    'current_price': nifty_price if nifty_price > 0 else nifty_data.get('last_price', 0),
+                    'change': nifty_data.get('net_change', 0),
+                    'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
+                    'last_updated': websocket_prices_data.get('NIFTY 50', {}).get('timestamp', nifty_data.get('timestamp', 'N/A')),
+                    'error': websocket_prices_data.get('NIFTY 50', {}).get('error')
+                },
+                'bank_nifty': {
+                    'name': 'NIFTY BANK',
+                    'current_price': bank_nifty_price if bank_nifty_price > 0 else bank_nifty_data.get('last_price', 0),
+                    'change': bank_nifty_data.get('net_change', 0),
+                    'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
+                    'last_updated': websocket_prices_data.get('NIFTY BANK', {}).get('timestamp', bank_nifty_data.get('timestamp', 'N/A')),
+                    'error': websocket_prices_data.get('NIFTY BANK', {}).get('error')
+                }
             }
-        }
+        except Exception as e:
+            # If REST API fails, return WebSocket data only
+            formatted_data = {
+                'nifty': {
+                    'name': 'NIFTY 50',
+                    'current_price': nifty_price,
+                    'change': 0,
+                    'change_percent': 0,
+                    'last_updated': websocket_prices_data.get('NIFTY 50', {}).get('timestamp', 'N/A'),
+                    'error': websocket_prices_data.get('NIFTY 50', {}).get('error')
+                },
+                'bank_nifty': {
+                    'name': 'NIFTY BANK',
+                    'current_price': bank_nifty_price,
+                    'change': 0,
+                    'change_percent': 0,
+                    'last_updated': websocket_prices_data.get('NIFTY BANK', {}).get('timestamp', 'N/A'),
+                    'error': websocket_prices_data.get('NIFTY BANK', {}).get('error')
+                }
+            }
         
-        return jsonify(prices_data)
+        return jsonify(formatted_data)
         
     except Exception as e:
-        return jsonify({'error': f'Error fetching stock prices: {str(e)}'}), 500
+        return jsonify({'error': f'Error fetching stock prices via WebSocket: {str(e)}'}), 500
 
 def send_alert_to_kite(alert_data):
     """Send alert to KITE API"""
@@ -1145,6 +1257,375 @@ def get_instrument_type(symbol):
     else:
         return symbol
 
+# Global dictionary to store WebSocket prices
+websocket_prices = {
+    'NIFTY 50': {'last_price': 0, 'timestamp': None, 'previous_close': 0},
+    'NIFTY BANK': {'last_price': 0, 'timestamp': None, 'previous_close': 0}
+}
+
+# Global WebSocket ticker instance
+kws = None
+
+# Global flag to track if continuous WebSocket is running
+continuous_websocket_running = False
+continuous_websocket_thread = None
+continuous_kws = None
+
+def get_instrument_tokens():
+    """Get instrument tokens for NIFTY 50 and NIFTY BANK"""
+    global kite
+    
+    if not kite:
+        return None, None
+    
+    try:
+        # Get all NSE instruments
+        instruments = kite.instruments("NSE")
+        
+        # Find tokens for NIFTY 50 and NIFTY BANK
+        nifty_token = None
+        bank_nifty_token = None
+        
+        for instrument in instruments:
+            if instrument['tradingsymbol'] == 'NIFTY 50':
+                nifty_token = instrument['instrument_token']
+            elif instrument['tradingsymbol'] == 'NIFTY BANK':
+                bank_nifty_token = instrument['instrument_token']
+            
+            if nifty_token and bank_nifty_token:
+                break
+        
+        return nifty_token, bank_nifty_token
+    except Exception as e:
+        print(f"Error getting instrument tokens: {e}")
+        # Fallback to known tokens if API call fails
+        return 256265, 260105  # Standard tokens for NIFTY 50 and NIFTY BANK
+
+def get_credentials_from_session_or_file():
+    """Get API credentials from session or file-based storage"""
+    api_key = None
+    access_token = None
+    
+    # Only try to access session if we're in a request context
+    if has_request_context():
+        try:
+            api_key = session.get('api_key')
+            access_token = session.get('access_token')
+        except RuntimeError:
+            # Not in request context, skip session
+            pass
+    
+    # If not in session, try global variables (loaded from file)
+    if not api_key:
+        api_key = user_api_key
+    
+    # If access_token not in session, try to load from file
+    if not access_token:
+        if os.path.exists(SESSION_FILE):
+            try:
+                with open(SESSION_FILE, 'r') as f:
+                    data = json.load(f)
+                    access_token = data.get('access_token')
+                    if not api_key:
+                        api_key = data.get('api_key')
+            except Exception as e:
+                print(f"Error loading credentials from file: {e}")
+    
+    return api_key, access_token
+
+def fetch_nifty_prices_websocket(timeout=10):
+    """
+    Fetch Nifty 50 and Bank Nifty last traded prices using WebSocket.
+    
+    If continuous WebSocket is running, returns cached prices from it.
+    Otherwise, creates a temporary connection (but this conflicts with continuous WebSocket).
+    
+    Args:
+        timeout (int): Maximum time to wait for prices in seconds (default: 10)
+    
+    Returns:
+        dict: Dictionary containing last traded prices for NIFTY 50 and NIFTY BANK
+              Format: {
+                  'NIFTY 50': {'last_price': float, 'timestamp': str},
+                  'NIFTY BANK': {'last_price': float, 'timestamp': str}
+              }
+    """
+    global kite, kws, websocket_prices, continuous_websocket_running
+    
+    # If continuous WebSocket is running, use its cached prices
+    if continuous_websocket_running:
+        # Return cached prices from continuous WebSocket
+        result = websocket_prices.copy()
+        # If we have valid prices, return them
+        if result['NIFTY 50']['last_price'] > 0 or result['NIFTY BANK']['last_price'] > 0:
+            return result
+        # Otherwise, wait a bit for prices to arrive
+        time.sleep(1)
+        result = websocket_prices.copy()
+        if result['NIFTY 50']['last_price'] > 0 or result['NIFTY BANK']['last_price'] > 0:
+            return result
+    
+    # If continuous WebSocket is not running, we can't create a temporary one
+    # because it would conflict with Twisted reactor if continuous WebSocket starts later
+    # Instead, fall back to REST API
+    print("Continuous WebSocket not running, using REST API fallback")
+    
+    # Get credentials from session or file
+    api_key, access_token = get_credentials_from_session_or_file()
+    
+    # Check if we have valid credentials
+    if not api_key or not access_token:
+        return {
+            'NIFTY 50': {'last_price': 0, 'timestamp': None, 'error': 'Not authenticated. Please login first.'},
+            'NIFTY BANK': {'last_price': 0, 'timestamp': None, 'error': 'Not authenticated. Please login first.'}
+        }
+    
+    # Check if kite object is initialized, if not, initialize it
+    global kite
+    if not kite:
+        try:
+            kite = KiteConnect(api_key=api_key)
+            kite.set_access_token(access_token)
+        except Exception as e:
+            return {
+                'NIFTY 50': {'last_price': 0, 'timestamp': None, 'error': f'Error initializing KiteConnect: {str(e)}'},
+                'NIFTY BANK': {'last_price': 0, 'timestamp': None, 'error': f'Error initializing KiteConnect: {str(e)}'}
+            }
+    
+    # Use REST API as fallback instead of creating temporary WebSocket
+    try:
+        nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+        bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+        
+        return {
+            'NIFTY 50': {
+                'last_price': nifty_data.get('last_price', 0),
+                'timestamp': nifty_data.get('timestamp', datetime.now().isoformat())
+            },
+            'NIFTY BANK': {
+                'last_price': bank_nifty_data.get('last_price', 0),
+                'timestamp': bank_nifty_data.get('timestamp', datetime.now().isoformat())
+            }
+        }
+    except Exception as e:
+        print(f"Error fetching prices via REST API: {e}")
+        return {
+            'NIFTY 50': {'last_price': 0, 'timestamp': None, 'error': str(e)},
+            'NIFTY BANK': {'last_price': 0, 'timestamp': None, 'error': str(e)}
+        }
+
+def start_continuous_websocket():
+    """Start a continuous WebSocket connection that broadcasts prices to all connected clients"""
+    global continuous_kws, continuous_websocket_running, kite
+    
+    if continuous_websocket_running:
+        print("Continuous WebSocket already running")
+        return
+    
+    # Get credentials
+    api_key, access_token = get_credentials_from_session_or_file()
+    
+    if not api_key or not access_token:
+        print("Cannot start continuous WebSocket: No credentials")
+        return
+    
+    # Ensure kite is initialized
+    if not kite:
+        try:
+            kite = KiteConnect(api_key=api_key)
+            kite.set_access_token(access_token)
+        except Exception as e:
+            print(f"Error initializing KiteConnect for continuous WebSocket: {e}")
+            return
+    
+    # Get instrument tokens
+    nifty_token, bank_nifty_token = get_instrument_tokens()
+    
+    if not nifty_token or not bank_nifty_token:
+        print("Cannot start continuous WebSocket: Could not get instrument tokens")
+        return
+    
+    continuous_websocket_running = True
+    
+    def on_ticks(ws, ticks):
+        """Callback to receive ticks and broadcast to all connected clients"""
+        try:
+            price_updates = {}
+            
+            for tick in ticks:
+                instrument_token = tick['instrument_token']
+                last_price = tick.get('last_price', 0)
+                timestamp = datetime.now().isoformat()
+                
+                if instrument_token == nifty_token:
+                    price_updates['nifty'] = {
+                        'name': 'NIFTY 50',
+                        'current_price': last_price,
+                        'last_updated': timestamp
+                    }
+                    websocket_prices['NIFTY 50'] = {
+                        'last_price': last_price,
+                        'timestamp': timestamp
+                    }
+                elif instrument_token == bank_nifty_token:
+                    price_updates['bank_nifty'] = {
+                        'name': 'NIFTY BANK',
+                        'current_price': last_price,
+                        'last_updated': timestamp
+                    }
+                    websocket_prices['NIFTY BANK'] = {
+                        'last_price': last_price,
+                        'timestamp': timestamp
+                    }
+            
+            # Broadcast price updates to all connected clients
+            if price_updates:
+                # Calculate change/change_percent from WebSocket data (no REST API call needed)
+                if 'nifty' in price_updates:
+                    previous_close = websocket_prices['NIFTY 50'].get('previous_close', 0)
+                    current_price = price_updates['nifty']['current_price']
+                    if previous_close > 0:
+                        change = current_price - previous_close
+                        change_percent = (change / previous_close) * 100
+                        price_updates['nifty']['change'] = change
+                        price_updates['nifty']['change_percent'] = change_percent
+                    else:
+                        price_updates['nifty']['change'] = 0
+                        price_updates['nifty']['change_percent'] = 0
+                
+                if 'bank_nifty' in price_updates:
+                    previous_close = websocket_prices['NIFTY BANK'].get('previous_close', 0)
+                    current_price = price_updates['bank_nifty']['current_price']
+                    if previous_close > 0:
+                        change = current_price - previous_close
+                        change_percent = (change / previous_close) * 100
+                        price_updates['bank_nifty']['change'] = change
+                        price_updates['bank_nifty']['change_percent'] = change_percent
+                    else:
+                        price_updates['bank_nifty']['change'] = 0
+                        price_updates['bank_nifty']['change_percent'] = 0
+                
+                # Emit to all connected clients
+                socketio.emit('price_update', price_updates)
+                
+        except Exception as e:
+            print(f"Error processing ticks in continuous WebSocket: {e}")
+    
+    def on_connect(ws, response):
+        """Callback on successful connect"""
+        try:
+            print("Continuous WebSocket connected, subscribing to instruments...")
+            # Subscribe to NIFTY 50 and NIFTY BANK
+            ws.subscribe([nifty_token, bank_nifty_token])
+            # Set mode to LTP (Last Traded Price) for both
+            ws.set_mode(ws.MODE_LTP, [nifty_token, bank_nifty_token])
+            print("Subscribed to NIFTY 50 and NIFTY BANK")
+            
+            # Get previous day's close price once (for calculating change/change_percent)
+            try:
+                global kite
+                if kite:
+                    nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+                    bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+                    
+                    previous_close_nifty = nifty_data.get('ohlc', {}).get('close', 0)
+                    previous_close_bank = bank_nifty_data.get('ohlc', {}).get('close', 0)
+                    
+                    websocket_prices['NIFTY 50']['previous_close'] = previous_close_nifty
+                    websocket_prices['NIFTY BANK']['previous_close'] = previous_close_bank
+                    
+                    print(f"Stored previous close prices - NIFTY 50: {previous_close_nifty}, NIFTY BANK: {previous_close_bank}")
+            except Exception as e:
+                print(f"Error fetching previous close prices: {e}")
+        except Exception as e:
+            print(f"Error in continuous WebSocket on_connect: {e}")
+    
+    def on_close(ws, code, reason):
+        """Callback on connection close"""
+        global continuous_websocket_running, continuous_kws
+        print(f"Continuous WebSocket closed: {code} - {reason}")
+        continuous_websocket_running = False
+        continuous_kws = None
+        # Note: Don't try to reconnect automatically as Twisted reactor can't be restarted
+        # The WebSocket will need to be restarted manually or on next server restart
+        print("WebSocket closed. Restart server to reconnect.")
+    
+    def on_error(ws, code, reason):
+        """Callback on error"""
+        print(f"Continuous WebSocket error: {code} - {reason}")
+    
+    def connect_websocket():
+        """Connect WebSocket in a separate thread"""
+        global continuous_kws, continuous_websocket_running
+        try:
+            # Check if already running to prevent multiple starts
+            if continuous_kws is not None:
+                print("WebSocket already initialized, skipping...")
+                return
+                
+            continuous_kws = KiteTicker(api_key, access_token)
+            continuous_kws.on_ticks = on_ticks
+            continuous_kws.on_connect = on_connect
+            continuous_kws.on_close = on_close
+            continuous_kws.on_error = on_error
+            
+            print("Starting continuous WebSocket connection...")
+            # Use threaded=True to run in separate thread (required for Twisted reactor)
+            continuous_kws.connect(threaded=True)
+        except Exception as e:
+            print(f"Error connecting continuous WebSocket: {e}")
+            continuous_websocket_running = False
+            continuous_kws = None
+    
+    # Start WebSocket connection in a daemon thread
+    global continuous_websocket_thread
+    continuous_websocket_thread = threading.Thread(target=connect_websocket, daemon=True)
+    continuous_websocket_thread.start()
+
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    print(f"Client connected: {request.sid}")
+    emit('connected', {'status': 'connected'})
+    
+    # Don't start WebSocket here - it should already be running from server startup
+    # Starting it here could cause Twisted reactor conflicts
+    if not continuous_websocket_running:
+        print("Warning: Continuous WebSocket not running. It should start on server startup.")
+    
+    # Send current prices if available
+    if websocket_prices['NIFTY 50']['last_price'] > 0 or websocket_prices['NIFTY BANK']['last_price'] > 0:
+        try:
+            global kite
+            if kite:
+                nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
+                bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
+                
+                current_prices = {
+                    'nifty': {
+                        'name': 'NIFTY 50',
+                        'current_price': websocket_prices['NIFTY 50']['last_price'] or nifty_data.get('last_price', 0),
+                        'change': nifty_data.get('net_change', 0),
+                        'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
+                        'last_updated': websocket_prices['NIFTY 50']['timestamp'] or nifty_data.get('timestamp', 'N/A')
+                    },
+                    'bank_nifty': {
+                        'name': 'NIFTY BANK',
+                        'current_price': websocket_prices['NIFTY BANK']['last_price'] or bank_nifty_data.get('last_price', 0),
+                        'change': bank_nifty_data.get('net_change', 0),
+                        'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
+                        'last_updated': websocket_prices['NIFTY BANK']['timestamp'] or bank_nifty_data.get('timestamp', 'N/A')
+                    }
+                }
+                emit('price_update', current_prices)
+        except Exception as e:
+            print(f"Error sending initial prices: {e}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    print(f"Client disconnected: {request.sid}")
+
 def check_price_touch_level(current_price, target_price, operator, previous_price=None):
     """Check if current price has crossed the alert level today and determine crossing direction"""
     if current_price == 0 or target_price == 0:
@@ -1418,15 +1899,33 @@ if __name__ == '__main__':
     
     print(f"🚀 Starting Flask app on port {port}")
     print("📊 Three levels database storage enabled")
+    print("🔌 Continuous WebSocket streaming enabled")
     print(f"🔧 Debug mode: {'ON' if is_debugging else 'OFF'}")
     print(f"🔄 Auto-reloader: {'OFF' if not use_reloader else 'ON'}")
     
-    # Run with settings optimized for debugging
-    app.run(
-        debug=True, 
-        host='0.0.0.0', 
+    # Start continuous WebSocket connection in background
+    # Only start once to avoid Twisted reactor conflicts
+    def start_websocket_on_startup():
+        time.sleep(3)  # Wait for server to fully start
+        try:
+            if not continuous_websocket_running and continuous_kws is None:
+                print("Starting continuous WebSocket on server startup...")
+                start_continuous_websocket()
+            else:
+                print("Continuous WebSocket already running or initialized")
+        except Exception as e:
+            print(f"Error starting continuous WebSocket on startup: {e}")
+    
+    # Only start the thread if not already running
+    if not continuous_websocket_running:
+        threading.Thread(target=start_websocket_on_startup, daemon=True).start()
+    
+    # Run with SocketIO (supports WebSocket)
+    socketio.run(
+        app,
+        debug=True,
+        host='0.0.0.0',
         port=port,
-        use_reloader=use_reloader,  # Disable reloader when debugging to prevent multiple instances
-        threaded=True,
-        processes=1  # Force single process
+        use_reloader=use_reloader,
+        allow_unsafe_werkzeug=True
     )

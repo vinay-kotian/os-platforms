@@ -293,7 +293,65 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
+// Initialize SocketIO connection for continuous price streaming
+const socket = io();
+
+// Connection status
+let isConnected = false;
+
+socket.on('connect', function() {
+    console.log('Connected to WebSocket server');
+    isConnected = true;
+    updateConnectionStatus(true);
+});
+
+socket.on('disconnect', function() {
+    console.log('Disconnected from WebSocket server');
+    isConnected = false;
+    updateConnectionStatus(false);
+});
+
+socket.on('connected', function(data) {
+    console.log('WebSocket handshake complete:', data);
+});
+
+// Listen for continuous price updates
+socket.on('price_update', function(data) {
+    console.log('Received price update:', data);
+    
+    // Update Nifty data if available
+    if (data.nifty) {
+        updatePriceCard('nifty', data.nifty);
+        if (data.nifty.current_price) {
+            updateNiftyPrice(data.nifty.current_price);
+        }
+    }
+    
+    // Update Bank Nifty data if available
+    if (data.bank_nifty) {
+        updatePriceCard('bank_nifty', data.bank_nifty);
+        if (data.bank_nifty.current_price) {
+            updateBankNiftyPrice(data.bank_nifty.current_price);
+        }
+    }
+});
+
+function updateConnectionStatus(connected) {
+    const statusElement = document.getElementById('refreshStatusCompact');
+    if (statusElement) {
+        if (connected) {
+            statusElement.textContent = 'Live';
+            statusElement.parentElement.classList.add('text-success');
+        } else {
+            statusElement.textContent = 'Offline';
+            statusElement.parentElement.classList.remove('text-success');
+        }
+    }
+}
+
+// Legacy refresh function (kept for manual refresh button)
 function refreshPrices(showButtonState = false) {
     // Show loading state only for manual refreshes
     let refreshBtn = null;
@@ -306,8 +364,8 @@ function refreshPrices(showButtonState = false) {
         refreshBtn.disabled = true;
     }
     
-    // Make AJAX call to fetch fresh data
-    fetch('/stocks/fetch-price')
+    // Make AJAX call to fetch fresh data via WebSocket
+    fetch('/stocks/fetch-price-websocket')
         .then(response => {
             if (!response.ok) {
                 throw new Error('Network response was not ok');
@@ -325,7 +383,7 @@ function refreshPrices(showButtonState = false) {
             // Update Bank Nifty data
             updatePriceCard('bank_nifty', data.bank_nifty);
             
-            console.log('Prices updated successfully');
+            console.log('Prices updated successfully via WebSocket');
         })
         .catch(error => {
             console.error('Error refreshing prices:', error);
@@ -365,99 +423,95 @@ function updatePriceCard(type, data) {
     lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
 }
 
-// Dynamic refresh rate management
+// Note: Auto-refresh is disabled as we now use continuous WebSocket streaming
+// The refresh controls are kept for manual refresh functionality
 let refreshInterval = null;
-let currentRefreshRate = 5000; // Default 5 seconds
+let currentRefreshRate = 0; // Set to 0 to disable polling (using WebSocket instead)
 
-// Function to start auto-refresh with specified interval
+// Function to start auto-refresh with specified interval (disabled - using WebSocket)
 function startAutoRefresh(interval) {
     // Clear existing interval
     if (refreshInterval) {
         clearInterval(refreshInterval);
+        refreshInterval = null;
     }
     
-    // Start new interval if interval > 0
-    if (interval > 0) {
-        refreshInterval = setInterval(function() {
-            refreshPrices(false);
-        }, interval);
-    }
+    // WebSocket provides continuous updates, so polling is not needed
+    // This function is kept for compatibility but does nothing
+    console.log('Using continuous WebSocket streaming - polling disabled');
 }
 
 // Function to update refresh status display
 function updateRefreshStatus(interval) {
     const statusElement = document.getElementById('refreshStatusCompact');
-    if (interval === 0) {
-        statusElement.textContent = 'Manual';
-    } else {
-        const seconds = interval / 1000;
-        const displayText = seconds >= 60 ? `${seconds / 60}m` : `${seconds}s`;
-        statusElement.textContent = displayText;
+    if (statusElement) {
+        if (isConnected) {
+            statusElement.textContent = 'Live';
+        } else {
+            statusElement.textContent = 'Connecting...';
+        }
     }
     
-    // Update active state in dropdown
+    // Update active state in dropdown (disabled for WebSocket mode)
     document.querySelectorAll('.refresh-option').forEach(option => {
         option.classList.remove('active');
-        if (option.getAttribute('data-rate') === interval.toString()) {
-            option.classList.add('active');
-        }
     });
 }
 
-// Function to save refresh rate to localStorage
-function saveRefreshRate(rate) {
-    localStorage.setItem('eldoradoRefreshRate', rate.toString());
-}
-
-// Function to load refresh rate from localStorage
-function loadRefreshRate() {
-    const saved = localStorage.getItem('eldoradoRefreshRate');
-    return saved ? parseInt(saved) : 5000; // Default to 5 seconds
-}
-
-// Initialize refresh rate from localStorage
-currentRefreshRate = loadRefreshRate();
-updateRefreshStatus(currentRefreshRate);
-startAutoRefresh(currentRefreshRate);
+// Initialize - WebSocket connection is automatic
+updateRefreshStatus(0);
 
 
-// Function to fetch current price for three levels
+// Function to fetch current price for three levels (fallback if WebSocket fails)
 function fetchCurrentPrice() {
-    fetch('/stocks/fetch-price')
-        .then(response => response.json())
-        .then(data => {
-            if (data.success && data.prices) {
-                // Update Bank Nifty price and levels
-                if (data.prices.bank_nifty) {
-                    updateBankNiftyPrice(data.prices.bank_nifty.current_price);
-                }
-                
-                // Update Nifty 50 price and levels
-                if (data.prices.nifty) {
-                    updateNiftyPrice(data.prices.nifty.current_price);
-                }
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching current price for three levels:', error);
-        });
+    // Prices are automatically updated via WebSocket, but we can fetch once on load if WebSocket fails
+    // Only fetch if WebSocket is not connected after a reasonable timeout
+    setTimeout(() => {
+        if (!isConnected) {
+            console.log('WebSocket not connected, using fallback fetch');
+            fetch('/stocks/fetch-price-websocket')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        console.error('Error fetching prices:', data.error);
+                        return;
+                    }
+                    
+                    // Update Bank Nifty price and levels
+                    if (data.bank_nifty && data.bank_nifty.current_price) {
+                        updateBankNiftyPrice(data.bank_nifty.current_price);
+                    }
+                    
+                    // Update Nifty 50 price and levels
+                    if (data.nifty && data.nifty.current_price) {
+                        updateNiftyPrice(data.nifty.current_price);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching current price for three levels:', error);
+                });
+        } else {
+            console.log('WebSocket connected, using real-time updates');
+        }
+    }, 2000); // Wait 2 seconds for WebSocket to connect
 }
 
-// Function to refresh three levels independently
+// Function to refresh three levels independently (now handled by WebSocket)
 function refreshThreeLevels() {
-    fetchCurrentPrice();
+    // WebSocket automatically updates prices via price_update events
+    // Only use fallback if WebSocket is not connected
+    if (!isConnected) {
+        fetchCurrentPrice();
+    }
 }
 
 
-// Event listeners for refresh controls
+// Event listeners for refresh controls (disabled - using WebSocket)
 document.querySelectorAll('.refresh-option').forEach(option => {
     option.addEventListener('click', function(e) {
         e.preventDefault();
-        const newRate = parseInt(this.getAttribute('data-rate'));
-        currentRefreshRate = newRate;
-        saveRefreshRate(newRate);
-        updateRefreshStatus(newRate);
-        startAutoRefresh(newRate);
+        // Show message that WebSocket is being used
+        alert('Using continuous WebSocket streaming. Prices update automatically in real-time.');
         
         // Close dropdown
         document.querySelector('[tabindex="0"]').blur();
@@ -490,7 +544,9 @@ document.getElementById('manualRefresh').addEventListener('click', function() {
 
 // Initialize the form on page load
 document.addEventListener('DOMContentLoaded', function() {
-    refreshThreeLevels(); // Load current price for three levels independently
+    // Wait for WebSocket connection before initializing
+    // Prices will be updated automatically via WebSocket
+    // Only use fallback if WebSocket fails to connect
     
     // Load levels from database
     loadLevelsFromDatabase();
@@ -500,6 +556,14 @@ document.addEventListener('DOMContentLoaded', function() {
         updateBankLevelDisplay(i);
         updateNiftyLevelDisplay(i);
     }
+    
+    // Set up fallback fetch only if WebSocket doesn't connect within 3 seconds
+    setTimeout(() => {
+        if (!isConnected) {
+            console.log('WebSocket connection timeout, using fallback');
+            refreshThreeLevels();
+        }
+    }, 3000);
 });
 
 // Three Levels functionality
