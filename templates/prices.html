@@ -359,26 +359,8 @@ function updatePriceCard(type, data) {
     }
 }
 
-// Note: Auto-refresh is disabled as we now use continuous WebSocket streaming
-// The refresh controls are kept for manual refresh functionality
-let refreshInterval = null;
-let currentRefreshRate = 0; // Set to 0 to disable polling (using WebSocket instead)
-
-// Function to start auto-refresh with specified interval (disabled - using WebSocket)
-function startAutoRefresh(interval) {
-    // Clear existing interval
-    if (refreshInterval) {
-        clearInterval(refreshInterval);
-        refreshInterval = null;
-    }
-    
-    // WebSocket provides continuous updates, so polling is not needed
-    // This function is kept for compatibility but does nothing
-    console.log('Using continuous WebSocket streaming - polling disabled');
-}
-
 // Function to update refresh status display
-function updateRefreshStatus(interval) {
+function updateRefreshStatus() {
     const statusElement = document.getElementById('refreshStatusCompact');
     if (statusElement) {
         if (isConnected) {
@@ -395,7 +377,7 @@ function updateRefreshStatus(interval) {
 }
 
 // Initialize - WebSocket connection is automatic
-updateRefreshStatus(0);
+updateRefreshStatus();
 
 
 // Function to fetch current price for three levels (fallback if WebSocket fails)

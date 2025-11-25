@@ -1226,42 +1226,6 @@ def clear_levels_endpoint():
     except Exception as e:
         return jsonify({'error': f'Error clearing levels: {str(e)}', 'success': False}), 500
 
-@app.route('/levels/get/<uuid>', methods=['GET'])
-def get_level_by_uuid_endpoint(level_uuid):
-    """API endpoint to get a specific level by UUID"""
-    try:
-        conn = sqlite3.connect(DATABASE_FILE)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT uuid, user_id, index_type, level_value, created_at, updated_at, created_date
-            FROM level 
-            WHERE uuid = ?
-        ''', (level_uuid,))
-        
-        result = cursor.fetchone()
-        conn.close()
-        
-        if result:
-            level_uuid, user_id, index_type, level_value, created_at, updated_at, created_date = result
-            return jsonify({
-                'level': {
-                    'uuid': level_uuid,
-                    'user_id': user_id,
-                    'index_type': index_type,
-                    'level_value': level_value,
-                    'created_at': created_at,
-                    'updated_at': updated_at,
-                    'created_date': created_date
-                },
-                'success': True
-            }), 200
-        else:
-            return jsonify({'error': 'Level not found', 'success': False}), 404
-            
-    except Exception as e:
-        return jsonify({'error': f'Error getting level: {str(e)}', 'success': False}), 500
-
 @app.route('/levels/delete/<uuid>', methods=['DELETE'])
 def delete_level_endpoint(uuid):
     """API endpoint to delete a level by UUID"""
