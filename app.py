@@ -829,6 +829,144 @@ def logout():
     return redirect(url_for('index'))
 
 # ============================================================================
+# Trading/Trend Detection API Endpoints
+# ============================================================================
+
+@app.route('/trading/set-entry-price', methods=['POST'])
+def set_entry_price():
+    """API endpoint to set entry price for an instrument (saves to DB and updates cache)"""
+    try:
+        from services import save_entry_price_to_db
+        
+        data = request.get_json()
+        instrument = data.get('instrument')  # 'NIFTY_50' or 'NIFTY_BANK'
+        entry_price = data.get('entry_price')
+        
+        if not instrument or entry_price is None:
+            return jsonify({'error': 'Missing required fields (instrument, entry_price)', 'success': False}), 400
+        
+        if instrument not in ['NIFTY_50', 'NIFTY_BANK']:
+            return jsonify({'error': 'Invalid instrument. Must be NIFTY_50 or NIFTY_BANK', 'success': False}), 400
+        
+        if not isinstance(entry_price, (int, float)) or entry_price <= 0:
+            return jsonify({'error': 'entry_price must be a positive number', 'success': False}), 400
+        
+        # Save to database (this also updates the cache automatically)
+        user_id = 'default_user'  # You can modify this based on your auth system
+        success = save_entry_price_to_db(user_id, instrument, float(entry_price))
+        
+        if success:
+            return jsonify({
+                'message': f'Entry price saved for {instrument}',
+                'entry_price': entry_price,
+                'success': True
+            }), 200
+        else:
+            return jsonify({'error': 'Failed to save entry price to database', 'success': False}), 500
+        
+    except Exception as e:
+        return jsonify({'error': f'Error setting entry price: {str(e)}', 'success': False}), 500
+
+@app.route('/trading/get-trend', methods=['GET'])
+def get_trend_status():
+    """API endpoint to get current trend status for instruments"""
+    try:
+        from services import get_trend, nifty_prices, bank_nifty_prices, entry_prices_cache, previous_trends
+        
+        nifty_trend = get_trend(nifty_prices)
+        bank_nifty_trend = get_trend(bank_nifty_prices)
+        
+        return jsonify({
+            'trends': {
+                'NIFTY_50': {
+                    'trend': nifty_trend,
+                    'previous_trend': previous_trends.get('NIFTY_50'),
+                    'price_count': len(nifty_prices),
+                    'entry_price': entry_prices_cache.get('NIFTY_50'),
+                    'current_price': list(nifty_prices)[-1] if nifty_prices else None
+                },
+                'NIFTY_BANK': {
+                    'trend': bank_nifty_trend,
+                    'previous_trend': previous_trends.get('NIFTY_BANK'),
+                    'price_count': len(bank_nifty_prices),
+                    'entry_price': entry_prices_cache.get('NIFTY_BANK'),
+                    'current_price': list(bank_nifty_prices)[-1] if bank_nifty_prices else None
+                }
+            },
+            'success': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error getting trend status: {str(e)}', 'success': False}), 500
+
+@app.route('/trading/get-trades', methods=['GET'])
+def get_trades_endpoint():
+    """API endpoint to get all live trades"""
+    try:
+        from services import get_trades, check_and_update_trades_from_orders, kite, PAPER_TRADING_ENABLED
+        
+        # Check and update trades from recent orders (only for live trading)
+        if kite and not PAPER_TRADING_ENABLED:
+            check_and_update_trades_from_orders(kite)
+        
+        # Get status filter from query params
+        status = request.args.get('status')  # 'OPEN' or 'CLOSED'
+        instrument = request.args.get('instrument')  # 'NIFTY_50' or 'NIFTY_BANK'
+        
+        trades = get_trades(status=status, instrument=instrument)
+        
+        return jsonify({
+            'trades': trades,
+            'count': len(trades),
+            'paper_trading': PAPER_TRADING_ENABLED,
+            'success': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error getting trades: {str(e)}', 'success': False}), 500
+
+@app.route('/trading/get-paper-trades', methods=['GET'])
+def get_paper_trades_endpoint():
+    """API endpoint to get all paper trades"""
+    try:
+        from services import get_paper_trades
+        
+        # Get status filter from query params
+        status = request.args.get('status')  # 'OPEN' or 'CLOSED'
+        instrument = request.args.get('instrument')  # 'NIFTY_50' or 'NIFTY_BANK'
+        
+        trades = get_paper_trades(status=status, instrument=instrument)
+        
+        return jsonify({
+            'trades': trades,
+            'count': len(trades),
+            'success': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error getting paper trades: {str(e)}', 'success': False}), 500
+
+@app.route('/trading/update-trades', methods=['POST'])
+def update_trades_endpoint():
+    """API endpoint to manually trigger trade status update from orders"""
+    try:
+        from services import check_and_update_trades_from_orders, kite
+        
+        if not kite:
+            return jsonify({'error': 'KiteConnect not initialized', 'success': False}), 400
+        
+        updated_count = check_and_update_trades_from_orders(kite)
+        
+        return jsonify({
+            'message': f'Updated {updated_count} trades',
+            'updated_count': updated_count,
+            'success': True
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': f'Error updating trades: {str(e)}', 'success': False}), 500
+
+# ============================================================================
 # SocketIO Handlers
 # ============================================================================
 
@@ -961,6 +1099,17 @@ if __name__ == '__main__':
     # Only start the thread if not already running
     if not continuous_websocket_running:
         threading.Thread(target=start_websocket_on_startup, daemon=True).start()
+    
+    # Start trend monitoring background thread
+    from services import start_trend_monitoring, start_paper_trade_monitoring, PAPER_TRADING_ENABLED
+    start_trend_monitoring()
+    
+    # Start paper trade monitoring background thread if paper trading is enabled
+    if PAPER_TRADING_ENABLED:
+        start_paper_trade_monitoring()
+        print("📝 Paper trading mode: ENABLED")
+    else:
+        print("💰 Live trading mode: ENABLED")
     
     # Run with SocketIO (supports WebSocket)
     socketio.run(

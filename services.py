@@ -18,6 +18,7 @@ from flask_socketio import emit
 from kiteconnect import KiteConnect, KiteTicker
 import threading
 import time
+import numpy as np
 
 # Import socketio from app (will be set by app.py)
 socketio = None
@@ -38,6 +39,18 @@ websocket_prices = {
     'NIFTY BANK': {'last_price': 0, 'timestamp': None, 'previous_close': 0}
 }
 
+# Global dictionary to store option prices from WebSocket (for paper trading)
+# Key: tradingsymbol (e.g., "NIFTY26DEC23000CE"), Value: {'last_price': price, 'timestamp': timestamp}
+option_websocket_prices = {}
+
+# Mapping from instrument_token to tradingsymbol for options (for WebSocket price tracking)
+# Key: instrument_token, Value: {'tradingsymbol': symbol, 'exchange': exchange}
+option_token_to_symbol = {}
+
+# Mapping from tradingsymbol to instrument_token for options
+# Key: tradingsymbol, Value: instrument_token
+option_symbol_to_token = {}
+
 # Global WebSocket ticker instance
 kws = None
 continuous_websocket_running = False
@@ -46,6 +59,1003 @@ continuous_kws = None
 
 # Dictionary to store previous prices for alert crossing detection
 alert_previous_prices = {}
+
+# Price deques for trend detection (separate for each instrument)
+nifty_prices = deque(maxlen=20)  # Price history for NIFTY 50
+bank_nifty_prices = deque(maxlen=20)  # Price history for NIFTY BANK
+
+# Entry prices for trading logic (cached from database)
+# Dictionary to cache entry prices: {'NIFTY_50': price, 'NIFTY_BANK': price}
+entry_prices_cache = {
+    'NIFTY_50': None,
+    'NIFTY_BANK': None
+}
+
+# Previous trends for each instrument (to detect trend reversals)
+# Dictionary to track previous trend: {'NIFTY_50': 'UPTREND', 'NIFTY_BANK': 'DOWNTREND', etc.}
+previous_trends = {
+    'NIFTY_50': None,
+    'NIFTY_BANK': None
+}
+
+# Track if order was already placed at entry level (to avoid duplicate orders)
+# Dictionary: {'NIFTY_50': True/False, 'NIFTY_BANK': True/False}
+order_placed_at_level = {
+    'NIFTY_50': False,
+    'NIFTY_BANK': False
+}
+
+# Track previous price position relative to entry level (to detect approach direction)
+# Dictionary: {'NIFTY_50': 'above'/'below'/'at', 'NIFTY_BANK': 'above'/'below'/'at'}
+previous_price_position = {
+    'NIFTY_50': None,
+    'NIFTY_BANK': None
+}
+
+# Flag to control trend monitoring background thread
+trend_monitoring_running = False
+trend_monitoring_thread = None
+
+# Feature flag for paper trading
+PAPER_TRADING_ENABLED = True  # Set to False for live trading
+
+# Flag to control paper trade monitoring background thread
+paper_trade_monitoring_running = False
+paper_trade_monitoring_thread = None
+
+
+# ============================================================================
+# Trend Detection Functions
+# ============================================================================
+
+def get_trend(prices_deque):
+    """
+    Calculate trend based on linear regression of price history.
+    
+    Args:
+        prices_deque: deque containing price values (floats)
+    
+    Returns:
+        str: "UPTREND", "DOWNTREND", "SIDEWAYS", or "NO_TREND"
+    """
+    if len(prices_deque) < 10:
+        return "NO_TREND"
+    
+    # Convert deque to numpy array
+    y = np.array(list(prices_deque))
+    x = np.arange(len(prices_deque))
+    
+    # Calculate linear regression slope
+    slope = np.polyfit(x, y, 1)[0]
+    
+    # Determine trend based on slope
+    if slope > 0:
+        return "UPTREND"
+    elif slope < 0:
+        return "DOWNTREND"
+    else:
+        return "SIDEWAYS"
+
+
+# ============================================================================
+# Trading Entry Functions with Target and Stop Loss
+# ============================================================================
+
+def subscribe_option_to_websocket(tradingsymbol, exchange="NFO"):
+    """
+    Subscribe to an option instrument in the WebSocket for real-time price updates.
+    
+    Args:
+        tradingsymbol: Option tradingsymbol (e.g., "NIFTY26DEC23000CE")
+        exchange: Exchange (default: "NFO")
+    
+    Returns:
+        bool: True if subscribed successfully, False otherwise
+    """
+    global continuous_kws, kite, option_symbol_to_token, option_token_to_symbol, option_websocket_prices
+    
+    if not continuous_kws or not continuous_websocket_running:
+        print(f"⚠️  WebSocket not running - cannot subscribe to {tradingsymbol}")
+        return False
+    
+    if not kite:
+        print(f"⚠️  KiteConnect not initialized - cannot subscribe to {tradingsymbol}")
+        return False
+    
+    try:
+        # Check if already subscribed
+        if tradingsymbol in option_symbol_to_token:
+            print(f"Already subscribed to {tradingsymbol}")
+            return True
+        
+        # Get instrument token for the option
+        instruments = kite.instruments(exchange)
+        option_instrument = next(
+            (inst for inst in instruments if inst.get('tradingsymbol') == tradingsymbol),
+            None
+        )
+        
+        if not option_instrument:
+            print(f"⚠️  Option {tradingsymbol} not found in instruments")
+            return False
+        
+        option_token = option_instrument['instrument_token']
+        
+        # Store mappings
+        option_symbol_to_token[tradingsymbol] = option_token
+        option_token_to_symbol[option_token] = {
+            'tradingsymbol': tradingsymbol,
+            'exchange': exchange
+        }
+        
+        # Initialize price in option_websocket_prices
+        option_key = f"{exchange}:{tradingsymbol}"
+        option_websocket_prices[option_key] = {
+            'last_price': 0,
+            'timestamp': None
+        }
+        
+        # Subscribe to the option in WebSocket
+        continuous_kws.subscribe([option_token])
+        continuous_kws.set_mode(continuous_kws.MODE_LTP, [option_token])
+        
+        print(f"✅ Subscribed to option {tradingsymbol} (token: {option_token}) for WebSocket price tracking")
+        return True
+        
+    except Exception as e:
+        print(f"Error subscribing option {tradingsymbol} to WebSocket: {e}")
+        return False
+
+
+def save_paper_trade_entry(instrument, option_type, tradingsymbol, exchange, quantity, 
+                           entry_price, underlying_entry_price, target_price, stoploss_price,
+                           user_id='default_user'):
+    """
+    Save paper trade entry to database (for paper trading mode).
+    
+    Args:
+        instrument: "NIFTY 50" or "NIFTY BANK"
+        option_type: "CALL" or "PUT"
+        tradingsymbol: Option tradingsymbol
+        exchange: Exchange (e.g., "NFO")
+        quantity: Quantity
+        entry_price: Option premium at entry
+        underlying_entry_price: Underlying price at entry
+        target_price: Target price (15% profit)
+        stoploss_price: Stop loss price (5% loss)
+        user_id: User ID
+    
+    Returns:
+        str: Trade UUID or None if failed
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        trade_uuid = str(uuid.uuid4())
+        current_time = datetime.now().isoformat()
+        
+        # Map instrument names
+        instrument_map = {
+            "NIFTY 50": "NIFTY_50",
+            "NIFTY BANK": "NIFTY_BANK"
+        }
+        instrument_db = instrument_map.get(instrument, instrument)
+        
+        cursor.execute('''
+            INSERT INTO paper_trades 
+            (trade_uuid, user_id, instrument, option_type, tradingsymbol, exchange, quantity,
+             entry_price, entry_time, underlying_entry_price, target_price, stoploss_price,
+             current_price, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)
+        ''', (trade_uuid, user_id, instrument_db, option_type, tradingsymbol, exchange, quantity,
+              entry_price, current_time, underlying_entry_price, target_price, stoploss_price,
+              entry_price, current_time, current_time))
+        
+        conn.commit()
+        conn.close()
+        
+        # Subscribe to option in WebSocket for real-time price updates
+        subscribe_option_to_websocket(tradingsymbol, exchange)
+        
+        print(f"📝 Paper trade entry saved: {trade_uuid}")
+        return trade_uuid
+        
+    except Exception as e:
+        print(f"Error saving paper trade entry to database: {e}")
+        return None
+
+
+def save_trade_entry(instrument, option_type, tradingsymbol, exchange, quantity, 
+                     entry_price, underlying_entry_price, target_price, stoploss_price,
+                     order_id, target_gtt_id, stoploss_gtt_id, user_id='default_user'):
+    """
+    Save trade entry to database.
+    
+    Args:
+        instrument: "NIFTY 50" or "NIFTY BANK"
+        option_type: "CALL" or "PUT"
+        tradingsymbol: Option tradingsymbol
+        exchange: Exchange (e.g., "NFO")
+        quantity: Quantity
+        entry_price: Option premium at entry
+        underlying_entry_price: Underlying price at entry
+        target_price: Target price (15% profit)
+        stoploss_price: Stop loss price (5% loss)
+        order_id: Order ID from Kite
+        target_gtt_id: Target GTT ID
+        stoploss_gtt_id: Stop loss GTT ID
+        user_id: User ID
+    
+    Returns:
+        str: Trade UUID or None if failed
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        trade_uuid = str(uuid.uuid4())
+        current_time = datetime.now().isoformat()
+        
+        # Map instrument names
+        instrument_map = {
+            "NIFTY 50": "NIFTY_50",
+            "NIFTY BANK": "NIFTY_BANK"
+        }
+        instrument_db = instrument_map.get(instrument, instrument)
+        
+        cursor.execute('''
+            INSERT INTO trades 
+            (trade_uuid, user_id, instrument, option_type, tradingsymbol, exchange, quantity,
+             entry_price, entry_time, underlying_entry_price, target_price, stoploss_price,
+             order_id, target_gtt_id, stoploss_gtt_id, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)
+        ''', (trade_uuid, user_id, instrument_db, option_type, tradingsymbol, exchange, quantity,
+              entry_price, current_time, underlying_entry_price, target_price, stoploss_price,
+              order_id, target_gtt_id, stoploss_gtt_id, current_time, current_time))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Trade entry saved to database: {trade_uuid}")
+        return trade_uuid
+        
+    except Exception as e:
+        print(f"Error saving trade entry to database: {e}")
+        return None
+
+
+def update_trade_exit(trade_uuid, exit_price, exit_reason, user_id='default_user'):
+    """
+    Update trade exit information when trade is closed.
+    
+    Args:
+        trade_uuid: Trade UUID
+        exit_price: Option premium at exit
+        exit_reason: 'TARGET', 'STOPLOSS', or 'MANUAL'
+        user_id: User ID
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Get trade entry details
+        cursor.execute('''
+            SELECT entry_price, quantity FROM trades 
+            WHERE trade_uuid = ? AND user_id = ? AND status = 'OPEN'
+        ''', (trade_uuid, user_id))
+        
+        trade = cursor.fetchone()
+        if not trade:
+            print(f"Trade {trade_uuid} not found or already closed")
+            conn.close()
+            return False
+        
+        entry_price, quantity = trade
+        
+        # Calculate profit/loss
+        profit_loss = (exit_price - entry_price) * quantity
+        profit_loss_percent = ((exit_price - entry_price) / entry_price) * 100
+        
+        current_time = datetime.now().isoformat()
+        
+        # Update trade
+        cursor.execute('''
+            UPDATE trades 
+            SET exit_price = ?, exit_time = ?, exit_reason = ?,
+                profit_loss = ?, profit_loss_percent = ?, status = 'CLOSED', updated_at = ?
+            WHERE trade_uuid = ? AND user_id = ?
+        ''', (exit_price, current_time, exit_reason, profit_loss, profit_loss_percent, 
+              current_time, trade_uuid, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        result = "PROFIT" if profit_loss > 0 else "LOSS"
+        print(f"✅ Trade exit updated: {trade_uuid} - {result} of {abs(profit_loss):.2f} ({profit_loss_percent:.2f}%)")
+        return True
+        
+    except Exception as e:
+        print(f"Error updating trade exit: {e}")
+        return False
+
+
+def get_trades(user_id='default_user', status=None, instrument=None):
+    """
+    Get trades from database.
+    
+    Args:
+        user_id: User ID
+        status: Filter by status ('OPEN', 'CLOSED') or None for all
+        instrument: Filter by instrument ('NIFTY_50', 'NIFTY_BANK') or None for all
+    
+    Returns:
+        list: List of trade dictionaries
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        query = 'SELECT * FROM trades WHERE user_id = ?'
+        params = [user_id]
+        
+        if status:
+            query += ' AND status = ?'
+            params.append(status)
+        
+        if instrument:
+            query += ' AND instrument = ?'
+            params.append(instrument)
+        
+        query += ' ORDER BY entry_time DESC'
+        
+        cursor.execute(query, params)
+        columns = [desc[0] for desc in cursor.description]
+        trades = []
+        
+        for row in cursor.fetchall():
+            trade_dict = dict(zip(columns, row))
+            trades.append(trade_dict)
+        
+        conn.close()
+        return trades
+        
+    except Exception as e:
+        print(f"Error getting trades: {e}")
+        return []
+
+
+def check_and_update_trades_from_orders(kite, user_id='default_user'):
+    """
+    Check open trades and update them if orders have been executed (GTT triggered).
+    This should be called periodically to sync trade status with actual order execution.
+    
+    Args:
+        kite: KiteConnect instance
+        user_id: User ID
+    
+    Returns:
+        int: Number of trades updated
+    """
+    if not kite:
+        return 0
+    
+    try:
+        # Get all open trades
+        open_trades = get_trades(user_id=user_id, status='OPEN')
+        if not open_trades:
+            return 0
+        
+        updated_count = 0
+        
+        # Get recent orders
+        try:
+            orders = kite.orders()
+        except:
+            return 0
+        
+        for trade in open_trades:
+            trade_uuid = trade['trade_uuid']
+            target_gtt_id = trade.get('target_gtt_id')
+            stoploss_gtt_id = trade.get('stoploss_gtt_id')
+            tradingsymbol = trade['tradingsymbol']
+            
+            # Check if any exit order was placed (GTT triggered)
+            # Look for SELL orders for this tradingsymbol
+            exit_orders = [
+                o for o in orders
+                if o.get('tradingsymbol') == tradingsymbol
+                and o.get('transaction_type') == 'SELL'
+                and o.get('status') == 'COMPLETE'
+                and o.get('order_timestamp', '') >= trade['entry_time']
+            ]
+            
+            if exit_orders:
+                # Get the most recent exit order
+                latest_exit = max(exit_orders, key=lambda x: x.get('order_timestamp', ''))
+                exit_price = latest_exit.get('average_price') or latest_exit.get('price', 0)
+                
+                # Determine exit reason based on price
+                target_price = trade['target_price']
+                stoploss_price = trade['stoploss_price']
+                
+                if abs(exit_price - target_price) < abs(exit_price - stoploss_price):
+                    exit_reason = 'TARGET'
+                else:
+                    exit_reason = 'STOPLOSS'
+                
+                # Update trade
+                if update_trade_exit(trade_uuid, exit_price, exit_reason, user_id):
+                    updated_count += 1
+        
+        return updated_count
+        
+    except Exception as e:
+        print(f"Error checking and updating trades: {e}")
+        return 0
+
+
+def place_option_with_tp_sl(kite, exchange, tradingsymbol, quantity, transaction_type,
+                            price=None, product="MIS", order_type="MARKET",
+                            target_price=None, stoploss_trigger=None, stoploss_price=None,
+                            instrument=None, option_type=None, underlying_entry_price=None):
+    """
+    Place an option order with target price (15% profit) and stop loss (5%).
+    Uses GTT (Good Till Triggered) for automatic target and stop loss execution.
+    
+    Args:
+        kite: KiteConnect instance
+        exchange: Exchange (e.g., "NFO")
+        tradingsymbol: Trading symbol (e.g., "NIFTY26DEC23000CE")
+        quantity: Quantity (lot size)
+        transaction_type: kite.TRANSACTION_TYPE_BUY or SELL
+        price: Limit price or None for market
+        product: "MIS" or "NRML"
+        order_type: "MARKET" or "LIMIT"
+        target_price: Target limit price for 15% profit
+        stoploss_trigger: Trigger price for stop loss
+        stoploss_price: Limit price for stop loss order
+        instrument: Instrument name (for database tracking)
+        option_type: "CALL" or "PUT" (for database tracking)
+        underlying_entry_price: Underlying price at entry (for database tracking)
+    
+    Returns:
+        dict: {"order_id": order_id, "gtt_ids": [gtt_ids], "trade_uuid": trade_uuid}
+    """
+    order_id = None
+    gtt_ids = []
+    target_gtt_id = None
+    stoploss_gtt_id = None
+    entry_price = None
+    
+    # 1) Place main order
+    try:
+        order_id = kite.place_order(
+            variety=kite.VARIETY_REGULAR,
+            exchange=exchange,
+            tradingsymbol=tradingsymbol,
+            transaction_type=transaction_type,
+            quantity=quantity,
+            order_type=getattr(kite, f"ORDER_TYPE_{order_type}"),
+            product=getattr(kite, f"PRODUCT_{product}"),
+            price=price
+        )
+        print(f"Main order placed, order_id: {order_id}")
+    except Exception as e:
+        print(f"Placing main order failed: {e}")
+        raise
+    
+    # 2) Wait & check order execution before placing GTTs
+    for _ in range(30):  # try for ~30 seconds
+        try:
+            orders = kite.orders()
+            my_order = next((o for o in orders if o.get("order_id") == order_id), None)
+            if my_order and my_order.get("status") in ("COMPLETE", "OPEN", "TRIGGER PENDING"):
+                print(f"Order status: {my_order.get('status')}")
+                break
+            time.sleep(1)
+        except Exception as e:
+            print(f"Error checking order status: {e}")
+            break
+    else:
+        print("Could not confirm order fill quickly; proceeding with GTT setup anyway.")
+    
+    # 3) Place GTT for target (15% profit)
+    if target_price is not None:
+        try:
+            target_payload = {
+                "type": "single",
+                "condition": {
+                    "exchange": exchange,
+                    "tradingsymbol": tradingsymbol,
+                    "trigger_values": [target_price],
+                    "last_price": None
+                },
+                "orders": [{
+                    "exchange": exchange,
+                    "tradingsymbol": tradingsymbol,
+                    "transaction_type": kite.TRANSACTION_TYPE_SELL if transaction_type == kite.TRANSACTION_TYPE_BUY else kite.TRANSACTION_TYPE_BUY,
+                    "quantity": quantity,
+                    "product": product,
+                    "order_type": kite.ORDER_TYPE_LIMIT,
+                    "price": target_price
+                }]
+            }
+            gtt_resp = kite.place_gtt(**target_payload)
+            # GTT response may have "trigger_id" or "id" depending on API version
+            gtt_id = gtt_resp.get("trigger_id") or gtt_resp.get("id")
+            if gtt_id:
+                gtt_ids.append(gtt_id)
+                target_gtt_id = gtt_id
+            print(f"Target GTT placed (15% profit): {gtt_resp}")
+        except Exception as e:
+            print(f"Failed to place target GTT: {e}")
+    
+    # 4) Place GTT for stop loss (5%)
+    if stoploss_trigger is not None and stoploss_price is not None:
+        try:
+            sl_payload = {
+                "type": "single",
+                "condition": {
+                    "exchange": exchange,
+                    "tradingsymbol": tradingsymbol,
+                    "trigger_values": [stoploss_trigger],
+                    "last_price": None
+                },
+                "orders": [{
+                    "exchange": exchange,
+                    "tradingsymbol": tradingsymbol,
+                    "transaction_type": kite.TRANSACTION_TYPE_SELL if transaction_type == kite.TRANSACTION_TYPE_BUY else kite.TRANSACTION_TYPE_BUY,
+                    "quantity": quantity,
+                    "product": product,
+                    "order_type": kite.ORDER_TYPE_LIMIT,
+                    "price": stoploss_price
+                }]
+            }
+            gtt_resp = kite.place_gtt(**sl_payload)
+            # GTT response may have "trigger_id" or "id" depending on API version
+            gtt_id = gtt_resp.get("trigger_id") or gtt_resp.get("id")
+            if gtt_id:
+                gtt_ids.append(gtt_id)
+                stoploss_gtt_id = gtt_id
+            print(f"Stoploss GTT placed (5%): {gtt_resp}")
+        except Exception as e:
+            print(f"Failed to place stoploss GTT: {e}")
+    
+    # Save trade entry to database
+    trade_uuid = None
+    if instrument and option_type and underlying_entry_price and entry_price:
+        trade_uuid = save_trade_entry(
+            instrument=instrument,
+            option_type=option_type,
+            tradingsymbol=tradingsymbol,
+            exchange=exchange,
+            quantity=quantity,
+            entry_price=entry_price,
+            underlying_entry_price=underlying_entry_price,
+            target_price=target_price if target_price else 0,
+            stoploss_price=stoploss_price if stoploss_price else 0,
+            order_id=str(order_id) if order_id else None,
+            target_gtt_id=str(target_gtt_id) if target_gtt_id else None,
+            stoploss_gtt_id=str(stoploss_gtt_id) if stoploss_gtt_id else None
+        )
+    
+    return {
+        "order_id": order_id,
+        "gtt_ids": gtt_ids,
+        "trade_uuid": trade_uuid,
+        "entry_price": entry_price
+    }
+
+
+def get_option_tradingsymbol(kite, instrument, entry_price, option_type="CE"):
+    """
+    Get the ATM (At The Money) option tradingsymbol based on entry price.
+    
+    Args:
+        kite: KiteConnect instance
+        instrument: "NIFTY 50" or "NIFTY BANK"
+        entry_price: Entry price (underlying price) to find ATM strike
+        option_type: "CE" for CALL, "PE" for PUT
+    
+    Returns:
+        str: Tradingsymbol (e.g., "NIFTY26DEC23000CE") or None if not found
+    """
+    if not kite:
+        print("KiteConnect not initialized")
+        return None
+    
+    try:
+        # Map instrument names to underlying symbols
+        underlying_map = {
+            "NIFTY 50": "NIFTY",
+            "NIFTY BANK": "BANKNIFTY"
+        }
+        
+        underlying = underlying_map.get(instrument)
+        if not underlying:
+            print(f"Unknown instrument: {instrument}")
+            return None
+        
+        # Get strike interval (50 for NIFTY, 100 for BANKNIFTY)
+        strike_interval = 50 if instrument == "NIFTY 50" else 100
+        
+        # Calculate ATM strike (round to nearest strike interval)
+        atm_strike = round(entry_price / strike_interval) * strike_interval
+        
+        # Get all NFO instruments
+        instruments = kite.instruments("NFO")
+        
+        # Filter for the underlying and option type
+        filtered = [
+            inst for inst in instruments
+            if inst["name"] == underlying
+            and inst["instrument_type"] == option_type
+            and inst["strike"] == atm_strike
+        ]
+        
+        if not filtered:
+            print(f"No {option_type} options found for {underlying} at strike {atm_strike}")
+            return None
+        
+        # Get the nearest expiry (sort by expiry date, take the first)
+        filtered.sort(key=lambda x: x["expiry"])
+        nearest_option = filtered[0]
+        
+        tradingsymbol = nearest_option["tradingsymbol"]
+        print(f"Found ATM {option_type} option: {tradingsymbol} (Strike: {atm_strike}, Expiry: {nearest_option['expiry']})")
+        
+        return tradingsymbol
+        
+    except Exception as e:
+        print(f"Error getting option tradingsymbol: {e}")
+        return None
+
+
+def place_call_order(price, instrument="NIFTY 50"):
+    """
+    Place a CALL order with 15% profit target and 5% stop loss.
+    Gets ATM (At The Money) option based on entry price.
+    
+    Args:
+        price: Entry price (underlying spot price) - used to find ATM strike
+        instrument: Instrument name (NIFTY 50 or NIFTY BANK)
+    """
+    global kite
+    
+    if not kite:
+        print(f"❌ CALL ORDER: KiteConnect not initialized for {instrument}")
+        return
+    
+    try:
+        # Configuration - these should be set based on your requirements
+        exchange = "NFO"
+        quantity = 50  # Lot size (adjust based on your requirements)
+        product = "MIS"  # or "NRML"
+        order_type = "MARKET"
+        
+        # Get tradingsymbol for ATM CALL option based on entry price
+        tradingsymbol = get_option_tradingsymbol(kite, instrument, price, option_type="CE")
+        if not tradingsymbol:
+            print(f"❌ CALL ORDER: Could not determine tradingsymbol for {instrument} at entry price {price}")
+            return
+        
+        # Fetch current option premium from market
+        try:
+            option_quote = kite.quote(f"{exchange}:{tradingsymbol}")
+            option_data = option_quote.get(f"{exchange}:{tradingsymbol}", {})
+            option_premium = option_data.get("last_price", 0)
+            
+            if option_premium == 0:
+                # Try to get LTP from depth or use a fallback
+                option_premium = option_data.get("depth", [{}])[0].get("price", 0) if option_data.get("depth") else 0
+                
+            if option_premium == 0:
+                print(f"⚠️  CALL ORDER: Could not fetch option premium for {tradingsymbol}")
+                print(f"   Placing order without GTT - please set target and stop loss manually")
+                # Place order without GTT as fallback
+                order_id = kite.place_order(
+                    variety=kite.VARIETY_REGULAR,
+                    exchange=exchange,
+                    tradingsymbol=tradingsymbol,
+                    transaction_type=kite.TRANSACTION_TYPE_BUY,
+                    quantity=quantity,
+                    order_type=kite.ORDER_TYPE_MARKET,
+                    product=kite.PRODUCT_MIS
+                )
+                print(f"🔼 CALL ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
+                print(f"   Tradingsymbol: {tradingsymbol}")
+                return
+                
+        except Exception as e:
+            print(f"⚠️  CALL ORDER: Error fetching option premium: {e}")
+            print(f"   Placing order without GTT")
+            # Place order without GTT as fallback
+            order_id = kite.place_order(
+                variety=kite.VARIETY_REGULAR,
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
+                transaction_type=kite.TRANSACTION_TYPE_BUY,
+                quantity=quantity,
+                order_type=kite.ORDER_TYPE_MARKET,
+                product=kite.PRODUCT_MIS
+            )
+            print(f"🔼 CALL ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
+            return
+        
+        # Calculate 15% profit target and 5% stop loss based on option premium
+        target_price = round(option_premium * 1.15, 2)  # 15% profit
+        stoploss_trigger = round(option_premium * 0.95, 2)  # 5% stop loss trigger
+        stoploss_price = round(option_premium * 0.94, 2)  # Slightly below trigger for execution
+        
+        print(f"📊 Option Premium: {option_premium:.2f}")
+        print(f"   Target (15%): {target_price:.2f}")
+        print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+        
+        # Place order with target and stop loss
+        result = place_option_with_tp_sl(
+            kite=kite,
+            exchange=exchange,
+            tradingsymbol=tradingsymbol,
+            quantity=quantity,
+            transaction_type=kite.TRANSACTION_TYPE_BUY,
+            order_type=order_type,
+            product=product,
+            target_price=target_price,
+            stoploss_trigger=stoploss_trigger,
+            stoploss_price=stoploss_price
+        )
+        
+        print(f"🔼 CALL ORDER PLACED for {instrument} at entry price {price}")
+        print(f"   Tradingsymbol: {tradingsymbol}")
+        print(f"   Order ID: {result['order_id']}")
+        print(f"   Target (15%): {target_price:.2f}")
+        print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+        print(f"   GTT IDs: {result['gtt_ids']}")
+        
+    except Exception as e:
+        print(f"❌ Error placing CALL order for {instrument}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def place_put_order(price, instrument="NIFTY 50"):
+    """
+    Place a PUT order with 15% profit target and 5% stop loss.
+    Gets ATM (At The Money) option based on entry price.
+    
+    Args:
+        price: Entry price (underlying spot price) - used to find ATM strike
+        instrument: Instrument name (NIFTY 50 or NIFTY BANK)
+    """
+    global kite
+    
+    if not kite:
+        print(f"❌ PUT ORDER: KiteConnect not initialized for {instrument}")
+        return
+    
+    try:
+        # Configuration - these should be set based on your requirements
+        exchange = "NFO"
+        quantity = 50  # Lot size (adjust based on your requirements)
+        product = "MIS"  # or "NRML"
+        order_type = "MARKET"
+        
+        # Get tradingsymbol for ATM PUT option based on entry price
+        tradingsymbol = get_option_tradingsymbol(kite, instrument, price, option_type="PE")
+        if not tradingsymbol:
+            print(f"❌ PUT ORDER: Could not determine tradingsymbol for {instrument} at entry price {price}")
+            return
+        
+        # Fetch current option premium from market
+        try:
+            option_quote = kite.quote(f"{exchange}:{tradingsymbol}")
+            option_data = option_quote.get(f"{exchange}:{tradingsymbol}", {})
+            option_premium = option_data.get("last_price", 0)
+            
+            if option_premium == 0:
+                # Try to get LTP from depth or use a fallback
+                option_premium = option_data.get("depth", [{}])[0].get("price", 0) if option_data.get("depth") else 0
+                
+            if option_premium == 0:
+                print(f"⚠️  PUT ORDER: Could not fetch option premium for {tradingsymbol}")
+                print(f"   Placing order without GTT - please set target and stop loss manually")
+                # Place order without GTT as fallback
+                order_id = kite.place_order(
+                    variety=kite.VARIETY_REGULAR,
+                    exchange=exchange,
+                    tradingsymbol=tradingsymbol,
+                    transaction_type=kite.TRANSACTION_TYPE_BUY,
+                    quantity=quantity,
+                    order_type=kite.ORDER_TYPE_MARKET,
+                    product=kite.PRODUCT_MIS
+                )
+                print(f"🔽 PUT ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
+                print(f"   Tradingsymbol: {tradingsymbol}")
+                return
+                
+        except Exception as e:
+            print(f"⚠️  PUT ORDER: Error fetching option premium: {e}")
+            print(f"   Placing order without GTT")
+            # Place order without GTT as fallback
+            order_id = kite.place_order(
+                variety=kite.VARIETY_REGULAR,
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
+                transaction_type=kite.TRANSACTION_TYPE_BUY,
+                quantity=quantity,
+                order_type=kite.ORDER_TYPE_MARKET,
+                product=kite.PRODUCT_MIS
+            )
+            print(f"🔽 PUT ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
+            return
+        
+        # Calculate 15% profit target and 5% stop loss based on option premium
+        target_price = round(option_premium * 1.15, 2)  # 15% profit
+        stoploss_trigger = round(option_premium * 0.95, 2)  # 5% stop loss trigger
+        stoploss_price = round(option_premium * 0.94, 2)  # Slightly below trigger for execution
+        
+        print(f"📊 Option Premium: {option_premium:.2f}")
+        print(f"   Target (15%): {target_price:.2f}")
+        print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+        
+        # Check if paper trading is enabled
+        if PAPER_TRADING_ENABLED:
+            # Paper trading: Save to paper_trades table without placing real order
+            trade_uuid = save_paper_trade_entry(
+                instrument=instrument,
+                option_type="PUT",
+                tradingsymbol=tradingsymbol,
+                exchange=exchange,
+                quantity=quantity,
+                entry_price=option_premium,
+                underlying_entry_price=price,
+                target_price=target_price,
+                stoploss_price=stoploss_price
+            )
+            
+            print(f"📝 PAPER TRADE - PUT ORDER for {instrument} at entry price {price}")
+            print(f"   Tradingsymbol: {tradingsymbol}")
+            print(f"   Entry Premium: {option_premium:.2f}")
+            print(f"   Target (15%): {target_price:.2f}")
+            print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+            print(f"   Trade UUID: {trade_uuid}")
+        else:
+            # Live trading: Place actual order
+            result = place_option_with_tp_sl(
+                kite=kite,
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
+                quantity=quantity,
+                transaction_type=kite.TRANSACTION_TYPE_BUY,
+                order_type=order_type,
+                product=product,
+                target_price=target_price,
+                stoploss_trigger=stoploss_trigger,
+                stoploss_price=stoploss_price,
+                instrument=instrument,
+                option_type="PUT",
+                underlying_entry_price=price
+            )
+            
+            print(f"🔽 LIVE TRADE - PUT ORDER PLACED for {instrument} at entry price {price}")
+            print(f"   Tradingsymbol: {tradingsymbol}")
+            print(f"   Order ID: {result['order_id']}")
+            print(f"   Entry Premium: {result.get('entry_price', option_premium):.2f}")
+            print(f"   Target (15%): {target_price:.2f}")
+            print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+            print(f"   Trade UUID: {result.get('trade_uuid', 'N/A')}")
+            print(f"   GTT IDs: {result['gtt_ids']}")
+        
+    except Exception as e:
+        print(f"❌ Error placing PUT order for {instrument}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def check_trend_reversal(instrument_name, cache_key, prices_deque):
+    """
+    Check if price touches entry level and place reversal order based on approach direction.
+    This function is called by the background monitoring thread.
+    
+    Trading Logic (Reversal Strategy):
+    - If price comes from UP (above level) and touches the level → Buy CALL (expecting reversal up)
+    - If price comes from DOWN (below level) and touches the level → Buy PUT (expecting reversal down)
+    
+    Args:
+        instrument_name: Display name ("NIFTY 50" or "NIFTY BANK")
+        cache_key: Cache key ("NIFTY_50" or "NIFTY_BANK")
+        prices_deque: The price deque for this instrument
+    """
+    global previous_trends, entry_prices_cache, order_placed_at_level, previous_price_position
+    
+    # Skip if deque is empty
+    if len(prices_deque) == 0:
+        return
+    
+    # Get entry price for this instrument from cache
+    entry_price = entry_prices_cache.get(cache_key)
+    
+    # Skip if entry price is not set
+    if entry_price is None:
+        return
+    
+    # Get current price (last price in deque)
+    current_price = list(prices_deque)[-1]
+    
+    # Check if price is at/near entry level (within 0.1% tolerance)
+    price_tolerance = entry_price * 0.001  # 0.1% of entry price
+    price_diff = abs(current_price - entry_price)
+    is_at_entry_level = price_diff <= price_tolerance
+    
+    # Determine current price position relative to entry level
+    if is_at_entry_level:
+        current_position = 'at'
+    elif current_price > entry_price:
+        current_position = 'above'
+    else:
+        current_position = 'below'
+    
+    # Get previous price position
+    previous_position = previous_price_position.get(cache_key)
+    
+    # Check if price just touched the level (transitioned from above/below to at level)
+    if is_at_entry_level and previous_position is not None and previous_position != 'at':
+        # Price just touched the level from a different position
+        
+        # Only place order if we haven't already placed one at this level
+        if not order_placed_at_level.get(cache_key, False):
+            # Price came from UP (above) and touched level → Buy CALL (reversal up expected)
+            if previous_position == 'above':
+                place_call_order(current_price, instrument_name)
+                order_placed_at_level[cache_key] = True
+                print(f"🔼 CALL ORDER: {instrument_name} price touched entry level {entry_price} from UP (reversal trade) - current: {current_price}")
+            
+            # Price came from DOWN (below) and touched level → Buy PUT (reversal down expected)
+            elif previous_position == 'below':
+                place_put_order(current_price, instrument_name)
+                order_placed_at_level[cache_key] = True
+                print(f"🔽 PUT ORDER: {instrument_name} price touched entry level {entry_price} from DOWN (reversal trade) - current: {current_price}")
+    
+    # Reset order flag when price moves away from entry level
+    if not is_at_entry_level:
+        order_placed_at_level[cache_key] = False
+    
+    # Update previous price position for next comparison
+    previous_price_position[cache_key] = current_position
+    
+    # Also update previous trend (for reference/debugging)
+    current_trend = get_trend(prices_deque)
+    if current_trend != "NO_TREND":
+        previous_trends[cache_key] = current_trend
+
+
+def on_tick(price, instrument="NIFTY 50", entry_price=None):
+    """
+    Process a new price tick - appends price to deque.
+    Trend reversal checking is handled by the background monitoring thread.
+    
+    Args:
+        price: Current price
+        instrument: Instrument name ("NIFTY 50" or "NIFTY BANK")
+        entry_price: Entry price threshold (optional, not used for trend reversal strategy)
+    """
+    global nifty_prices, bank_nifty_prices
+    
+    # Select the appropriate price deque
+    if instrument == "NIFTY 50":
+        prices_deque = nifty_prices
+    elif instrument == "NIFTY BANK":
+        prices_deque = bank_nifty_prices
+    else:
+        print(f"Unknown instrument: {instrument}")
+        return
+    
+    # Append price to deque (trend reversal checking happens in background thread)
+    prices_deque.append(price)
 
 
 # ============================================================================
@@ -112,6 +1122,76 @@ def init_database():
             )
         ''')
         
+        # Create entry_prices table for trading entry prices
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS entry_prices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                instrument TEXT NOT NULL UNIQUE,  -- 'NIFTY_50' or 'NIFTY_BANK'
+                entry_price REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        
+        # Create trades table for tracking all live trades
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_uuid TEXT UNIQUE NOT NULL,
+                user_id TEXT NOT NULL,
+                instrument TEXT NOT NULL,  -- 'NIFTY_50' or 'NIFTY_BANK'
+                option_type TEXT NOT NULL,  -- 'CALL' or 'PUT'
+                tradingsymbol TEXT NOT NULL,
+                exchange TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                entry_price REAL NOT NULL,  -- Option premium at entry
+                entry_time TEXT NOT NULL,
+                underlying_entry_price REAL NOT NULL,  -- Underlying price when entered
+                target_price REAL NOT NULL,  -- 15% profit target
+                stoploss_price REAL NOT NULL,  -- 5% stop loss
+                order_id TEXT,
+                target_gtt_id TEXT,
+                stoploss_gtt_id TEXT,
+                exit_price REAL,  -- Option premium at exit
+                exit_time TEXT,
+                exit_reason TEXT,  -- 'TARGET', 'STOPLOSS', 'MANUAL'
+                profit_loss REAL,  -- Profit/Loss amount
+                profit_loss_percent REAL,  -- Profit/Loss percentage
+                status TEXT NOT NULL DEFAULT 'OPEN',  -- 'OPEN', 'CLOSED'
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        
+        # Create paper_trades table for paper trading
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS paper_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_uuid TEXT UNIQUE NOT NULL,
+                user_id TEXT NOT NULL,
+                instrument TEXT NOT NULL,  -- 'NIFTY_50' or 'NIFTY_BANK'
+                option_type TEXT NOT NULL,  -- 'CALL' or 'PUT'
+                tradingsymbol TEXT NOT NULL,
+                exchange TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                entry_price REAL NOT NULL,  -- Option premium at entry
+                entry_time TEXT NOT NULL,
+                underlying_entry_price REAL NOT NULL,  -- Underlying price when entered
+                target_price REAL NOT NULL,  -- 15% profit target
+                stoploss_price REAL NOT NULL,  -- 5% stop loss
+                current_price REAL,  -- Current option premium (updated by monitoring thread)
+                exit_price REAL,  -- Option premium at exit
+                exit_time TEXT,
+                exit_reason TEXT,  -- 'TARGET', 'STOPLOSS', 'MANUAL'
+                profit_loss REAL,  -- Profit/Loss amount
+                profit_loss_percent REAL,  -- Profit/Loss percentage
+                status TEXT NOT NULL DEFAULT 'OPEN',  -- 'OPEN', 'CLOSED'
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        ''')
+        
         # Migration: Handle schema changes for existing databases
         try:
             cursor.execute('PRAGMA table_info(level)')
@@ -158,6 +1238,9 @@ def init_database():
         conn.commit()
         conn.close()
         print("Database initialized successfully")
+        
+        # Load entry prices from database into cache
+        load_entry_prices_from_db()
         
     except Exception as e:
         print(f"Error initializing database: {e}")
@@ -324,6 +1407,98 @@ def clear_all_levels(user_id, index_type=None):
     except Exception as e:
         print(f"Error clearing levels: {e}")
         return 0
+
+def load_entry_prices_from_db(user_id='default_user'):
+    """
+    Load entry prices from database into cache (optimized - reads once).
+    This function should be called on startup and when entry prices are updated.
+    
+    Args:
+        user_id: User ID to fetch entry prices for
+    
+    Returns:
+        dict: Dictionary with entry prices {'NIFTY_50': price, 'NIFTY_BANK': price}
+    """
+    global entry_prices_cache
+    
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Fetch all entry prices for the user
+        cursor.execute('''
+            SELECT instrument, entry_price
+            FROM entry_prices
+            WHERE user_id = ?
+        ''', (user_id,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        # Update cache
+        entry_prices_cache = {
+            'NIFTY_50': None,
+            'NIFTY_BANK': None
+        }
+        
+        for instrument, entry_price in results:
+            if instrument in entry_prices_cache:
+                entry_prices_cache[instrument] = float(entry_price)
+        
+        print(f"Loaded entry prices from DB: NIFTY_50={entry_prices_cache['NIFTY_50']}, NIFTY_BANK={entry_prices_cache['NIFTY_BANK']}")
+        return entry_prices_cache
+        
+    except Exception as e:
+        print(f"Error loading entry prices from database: {e}")
+        return entry_prices_cache
+
+def save_entry_price_to_db(user_id, instrument, entry_price):
+    """
+    Save entry price to database and update cache.
+    
+    Args:
+        user_id: User ID
+        instrument: 'NIFTY_50' or 'NIFTY_BANK'
+        entry_price: Entry price value
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    global entry_prices_cache
+    
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        current_time = datetime.now().isoformat()
+        
+        # Insert or update entry price
+        cursor.execute('''
+            INSERT OR REPLACE INTO entry_prices 
+            (user_id, instrument, entry_price, created_at, updated_at)
+            VALUES (?, ?, ?, 
+                COALESCE((SELECT created_at FROM entry_prices WHERE user_id = ? AND instrument = ?), ?),
+                ?)
+        ''', (user_id, instrument, entry_price, user_id, instrument, current_time, current_time))
+        
+        conn.commit()
+        conn.close()
+        
+        # Update cache immediately
+        if instrument in entry_prices_cache:
+            entry_prices_cache[instrument] = float(entry_price)
+        
+        print(f"Saved entry price to DB: {instrument} = {entry_price}")
+        return True
+        
+    except Exception as e:
+        print(f"Error saving entry price to database: {e}")
+        return False
+
+
+def check_levels_for_today(user_id):
+    """Check if any levels have been touched today"""
+
 
 def store_alert_response(alert_data, kite_response):
     """Store alert response in database"""
@@ -855,6 +2030,364 @@ def update_alert_trigger_status(uuid, current_price, new_alert_count):
 
 
 # ============================================================================
+# Trend Monitoring Background Thread
+# ============================================================================
+
+def trend_monitoring_worker():
+    """
+    Background thread worker that continuously monitors prices and checks for trend reversals.
+    Runs in a loop, checking every second for trend reversals.
+    """
+    global trend_monitoring_running, nifty_prices, bank_nifty_prices
+    
+    print("📊 Trend monitoring background thread started")
+    
+    while trend_monitoring_running:
+        try:
+            # Check NIFTY 50 for trend reversals
+            if len(nifty_prices) > 0:
+                check_trend_reversal("NIFTY 50", "NIFTY_50", nifty_prices)
+            
+            # Check NIFTY BANK for trend reversals
+            if len(bank_nifty_prices) > 0:
+                check_trend_reversal("NIFTY BANK", "NIFTY_BANK", bank_nifty_prices)
+            
+            # Sleep for 1 second before next check
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"Error in trend monitoring thread: {e}")
+            time.sleep(1)  # Continue even if there's an error
+    
+    print("📊 Trend monitoring background thread stopped")
+
+
+def start_trend_monitoring():
+    """
+    Start the background thread for trend reversal monitoring.
+    This thread continuously monitors price deques and checks for trend reversals.
+    """
+    global trend_monitoring_running, trend_monitoring_thread
+    
+    if trend_monitoring_running:
+        print("Trend monitoring thread already running")
+        return
+    
+    trend_monitoring_running = True
+    trend_monitoring_thread = threading.Thread(target=trend_monitoring_worker, daemon=True)
+    trend_monitoring_thread.start()
+    print("✅ Started trend monitoring background thread")
+
+
+def stop_trend_monitoring():
+    """
+    Stop the background thread for trend reversal monitoring.
+    """
+    global trend_monitoring_running
+    
+    if not trend_monitoring_running:
+        return
+    
+    trend_monitoring_running = False
+    print("🛑 Stopping trend monitoring background thread")
+    
+    # Wait for thread to finish (with timeout)
+    if trend_monitoring_thread and trend_monitoring_thread.is_alive():
+        trend_monitoring_thread.join(timeout=2)
+
+
+# ============================================================================
+# Paper Trade Monitoring Background Thread
+# ============================================================================
+
+def paper_trade_monitoring_worker():
+    """
+    Background thread worker that continuously monitors paper trades and checks for target/stop loss.
+    Uses WebSocket prices for real-time updates (as good as live trading).
+    Runs in a loop, checking every second for paper trade exits.
+    """
+    global paper_trade_monitoring_running, kite, option_websocket_prices
+    
+    print("📝 Paper trade monitoring background thread started (using WebSocket prices)")
+    
+    while paper_trade_monitoring_running:
+        try:
+            # Get all open paper trades
+            open_trades = get_paper_trades(status='OPEN')
+            
+            if not open_trades:
+                time.sleep(2)  # Sleep shorter if no open trades
+                continue
+            
+            # Check each open paper trade
+            for trade in open_trades:
+                try:
+                    tradingsymbol = trade['tradingsymbol']
+                    exchange = trade['exchange']
+                    entry_price = trade['entry_price']
+                    target_price = trade['target_price']
+                    stoploss_price = trade['stoploss_price']
+                    trade_uuid = trade['trade_uuid']
+                    
+                    # First, try to get price from WebSocket (real-time)
+                    current_price = None
+                    option_key = f"{exchange}:{tradingsymbol}"
+                    
+                    if option_key in option_websocket_prices:
+                        ws_data = option_websocket_prices[option_key]
+                        current_price = ws_data.get('last_price', 0)
+                        # Use WebSocket price if available and recent (within last 10 seconds)
+                        timestamp = ws_data.get('timestamp')
+                        if timestamp:
+                            try:
+                                price_time = datetime.fromisoformat(timestamp)
+                                time_diff = (datetime.now() - price_time).total_seconds()
+                                if time_diff > 10:  # Price is stale, fallback to REST
+                                    current_price = None
+                            except:
+                                pass
+                    
+                    # Fallback to REST API if WebSocket price not available
+                    if current_price is None or current_price == 0:
+                        if kite:
+                            try:
+                                option_quote = kite.quote(option_key)
+                                option_data = option_quote.get(option_key, {})
+                                current_price = option_data.get("last_price", 0)
+                                
+                                if current_price == 0:
+                                    # Try to get from depth
+                                    current_price = option_data.get("depth", [{}])[0].get("price", 0) if option_data.get("depth") else 0
+                            except Exception as e:
+                                # Silently continue if REST API fails
+                                continue
+                        else:
+                            continue
+                    
+                    if current_price > 0:
+                        # Update current price in database
+                        update_paper_trade_current_price(trade_uuid, current_price)
+                        
+                        # Check if target is hit (15% profit)
+                        if current_price >= target_price:
+                            update_paper_trade_exit(trade_uuid, current_price, 'TARGET')
+                            print(f"📝 Paper trade {trade_uuid} hit TARGET at {current_price:.2f} (WebSocket: {option_key in option_websocket_prices})")
+                        
+                        # Check if stop loss is hit (5% loss)
+                        elif current_price <= stoploss_price:
+                            update_paper_trade_exit(trade_uuid, current_price, 'STOPLOSS')
+                            print(f"📝 Paper trade {trade_uuid} hit STOPLOSS at {current_price:.2f} (WebSocket: {option_key in option_websocket_prices})")
+                        
+                except Exception as e:
+                    print(f"Error processing paper trade: {e}")
+            
+            # Sleep for 1 second before next check (faster for real-time monitoring)
+            time.sleep(1)
+            
+        except Exception as e:
+            print(f"Error in paper trade monitoring thread: {e}")
+            time.sleep(1)  # Continue even if there's an error
+    
+    print("📝 Paper trade monitoring background thread stopped")
+
+
+def subscribe_existing_paper_trades_to_websocket():
+    """
+    Subscribe to all existing open paper trades in WebSocket for real-time price tracking.
+    This should be called when WebSocket is ready.
+    """
+    try:
+        open_trades = get_paper_trades(status='OPEN')
+        if not open_trades:
+            return
+        
+        subscribed_count = 0
+        for trade in open_trades:
+            tradingsymbol = trade['tradingsymbol']
+            exchange = trade['exchange']
+            if subscribe_option_to_websocket(tradingsymbol, exchange):
+                subscribed_count += 1
+        
+        if subscribed_count > 0:
+            print(f"✅ Subscribed {subscribed_count} existing paper trades to WebSocket")
+    except Exception as e:
+        print(f"Error subscribing existing paper trades to WebSocket: {e}")
+
+
+def start_paper_trade_monitoring():
+    """
+    Start the background thread for paper trade monitoring.
+    This thread continuously monitors paper trades and checks for target/stop loss.
+    """
+    global paper_trade_monitoring_running, paper_trade_monitoring_thread
+    
+    if paper_trade_monitoring_running:
+        print("Paper trade monitoring thread already running")
+        return
+    
+    # Subscribe to existing open paper trades
+    subscribe_existing_paper_trades_to_websocket()
+    
+    paper_trade_monitoring_running = True
+    paper_trade_monitoring_thread = threading.Thread(target=paper_trade_monitoring_worker, daemon=True)
+    paper_trade_monitoring_thread.start()
+    print("✅ Started paper trade monitoring background thread")
+
+
+def stop_paper_trade_monitoring():
+    """
+    Stop the background thread for paper trade monitoring.
+    """
+    global paper_trade_monitoring_running
+    
+    if not paper_trade_monitoring_running:
+        return
+    
+    paper_trade_monitoring_running = False
+    print("🛑 Stopping paper trade monitoring background thread")
+    
+    # Wait for thread to finish (with timeout)
+    if paper_trade_monitoring_thread and paper_trade_monitoring_thread.is_alive():
+        paper_trade_monitoring_thread.join(timeout=2)
+
+
+def get_paper_trades(user_id='default_user', status=None, instrument=None):
+    """
+    Get paper trades from database.
+    
+    Args:
+        user_id: User ID
+        status: Filter by status ('OPEN', 'CLOSED') or None for all
+        instrument: Filter by instrument ('NIFTY_50', 'NIFTY_BANK') or None for all
+    
+    Returns:
+        list: List of paper trade dictionaries
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        query = 'SELECT * FROM paper_trades WHERE user_id = ?'
+        params = [user_id]
+        
+        if status:
+            query += ' AND status = ?'
+            params.append(status)
+        
+        if instrument:
+            query += ' AND instrument = ?'
+            params.append(instrument)
+        
+        query += ' ORDER BY entry_time DESC'
+        
+        cursor.execute(query, params)
+        columns = [desc[0] for desc in cursor.description]
+        trades = []
+        
+        for row in cursor.fetchall():
+            trade_dict = dict(zip(columns, row))
+            trades.append(trade_dict)
+        
+        conn.close()
+        return trades
+        
+    except Exception as e:
+        print(f"Error getting paper trades: {e}")
+        return []
+
+
+def update_paper_trade_current_price(trade_uuid, current_price, user_id='default_user'):
+    """
+    Update current price for a paper trade.
+    
+    Args:
+        trade_uuid: Trade UUID
+        current_price: Current option premium
+        user_id: User ID
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        current_time = datetime.now().isoformat()
+        
+        cursor.execute('''
+            UPDATE paper_trades 
+            SET current_price = ?, updated_at = ?
+            WHERE trade_uuid = ? AND user_id = ? AND status = 'OPEN'
+        ''', (current_price, current_time, trade_uuid, user_id))
+        
+        conn.commit()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        print(f"Error updating paper trade current price: {e}")
+        return False
+
+
+def update_paper_trade_exit(trade_uuid, exit_price, exit_reason, user_id='default_user'):
+    """
+    Update paper trade exit information when target or stop loss is hit.
+    
+    Args:
+        trade_uuid: Trade UUID
+        exit_price: Option premium at exit
+        exit_reason: 'TARGET', 'STOPLOSS', or 'MANUAL'
+        user_id: User ID
+    
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Get trade entry details
+        cursor.execute('''
+            SELECT entry_price, quantity FROM paper_trades 
+            WHERE trade_uuid = ? AND user_id = ? AND status = 'OPEN'
+        ''', (trade_uuid, user_id))
+        
+        trade = cursor.fetchone()
+        if not trade:
+            print(f"Paper trade {trade_uuid} not found or already closed")
+            conn.close()
+            return False
+        
+        entry_price, quantity = trade
+        
+        # Calculate profit/loss
+        profit_loss = (exit_price - entry_price) * quantity
+        profit_loss_percent = ((exit_price - entry_price) / entry_price) * 100
+        
+        current_time = datetime.now().isoformat()
+        
+        # Update trade
+        cursor.execute('''
+            UPDATE paper_trades 
+            SET exit_price = ?, exit_time = ?, exit_reason = ?,
+                profit_loss = ?, profit_loss_percent = ?, status = 'CLOSED', updated_at = ?
+            WHERE trade_uuid = ? AND user_id = ?
+        ''', (exit_price, current_time, exit_reason, profit_loss, profit_loss_percent, 
+              current_time, trade_uuid, user_id))
+        
+        conn.commit()
+        conn.close()
+        
+        result = "PROFIT" if profit_loss > 0 else "LOSS"
+        print(f"✅ Paper trade exit updated: {trade_uuid} - {result} of {abs(profit_loss):.2f} ({profit_loss_percent:.2f}%)")
+        return True
+        
+    except Exception as e:
+        print(f"Error updating paper trade exit: {e}")
+        return False
+
+
+# ============================================================================
 # WebSocket Functions
 # ============================================================================
 
@@ -1039,12 +2572,26 @@ def start_continuous_websocket():
         """Callback to receive ticks and broadcast to all connected clients"""
         try:
             price_updates = {}
-            global price_history  # Access the global price_history deque
+            global price_history, option_websocket_prices, option_token_to_symbol  # Access global variables
             
             for tick in ticks:
                 instrument_token = tick['instrument_token']
                 last_price = tick.get('last_price', 0)
                 timestamp = datetime.now().isoformat()
+                
+                # Check if this is an option instrument (for paper trading)
+                if instrument_token in option_token_to_symbol:
+                    # This is an option instrument - update option_websocket_prices
+                    option_info = option_token_to_symbol[instrument_token]
+                    tradingsymbol = option_info['tradingsymbol']
+                    exchange = option_info.get('exchange', 'NFO')
+                    option_key = f"{exchange}:{tradingsymbol}"
+                    option_websocket_prices[option_key] = {
+                        'last_price': last_price,
+                        'timestamp': timestamp
+                    }
+                    # Continue to next tick (don't process as underlying)
+                    continue
                 
                 if instrument_token == nifty_token:
                     price_updates['nifty'] = {
@@ -1058,12 +2605,15 @@ def start_continuous_websocket():
                         'timestamp': timestamp,
                         'previous_close': websocket_prices['NIFTY 50'].get('previous_close', 0)
                     }
-                    # Append Nifty price to deque
+                    # Append Nifty price to deque (for general history)
                     price_history.append({
                         'instrument': 'NIFTY 50',
                         'price': last_price,
                         'timestamp': timestamp
                     })
+                    # Process tick for trend detection and entry logic
+                    # Entry price will be fetched from cache (loaded from DB on startup)
+                    on_tick(last_price, instrument="NIFTY 50")
                 elif instrument_token == bank_nifty_token:
                     price_updates['bank_nifty'] = {
                         'name': 'NIFTY BANK',
@@ -1076,12 +2626,15 @@ def start_continuous_websocket():
                         'timestamp': timestamp,
                         'previous_close': websocket_prices['NIFTY BANK'].get('previous_close', 0)
                     }
-                    # Append Bank Nifty price to deque
+                    # Append Bank Nifty price to deque (for general history)
                     price_history.append({
                         'instrument': 'NIFTY BANK',
                         'price': last_price,
                         'timestamp': timestamp
                     })
+                    # Process tick for trend detection and entry logic
+                    # Entry price will be fetched from cache (loaded from DB on startup)
+                    on_tick(last_price, instrument="NIFTY BANK")
             
             # Broadcast price updates to all connected clients
             if price_updates:
@@ -1126,6 +2679,9 @@ def start_continuous_websocket():
             # Set mode to LTP (Last Traded Price) for both
             ws.set_mode(ws.MODE_LTP, [nifty_token, bank_nifty_token])
             print("Subscribed to NIFTY 50 and NIFTY BANK")
+            
+            # Subscribe to existing open paper trades for real-time price tracking
+            subscribe_existing_paper_trades_to_websocket()
             
             # Get previous day's close price once (for calculating change/change_percent)
             try:
