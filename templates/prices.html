@@ -313,24 +313,50 @@ function refreshPrices(showButtonState = false) {
 
 function updatePriceCard(type, data) {
     const card = document.querySelector(`.grid > div:nth-child(${type === 'nifty' ? '1' : '2'})`);
+    if (!card) {
+        console.warn(`Card not found for type: ${type}`);
+        return;
+    }
     
     // Update price
     const priceElement = card.querySelector('.text-4xl');
-    priceElement.textContent = `₹${parseFloat(data.current_price).toFixed(2)}`;
+    if (priceElement && data.current_price !== undefined) {
+        priceElement.textContent = `₹${parseFloat(data.current_price).toFixed(2)}`;
+    }
     
-    // Update change
+    // Update change and percentage
     const changeElement = card.querySelector('.badge');
-    const change = parseFloat(data.change);
-    const changePercent = parseFloat(data.change_percent);
-    
-    changeElement.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
-    
-    // Update change class for styling
-    changeElement.className = `badge badge-lg ${change >= 0 ? 'badge-success' : 'badge-error'}`;
+    if (changeElement) {
+        const change = data.change !== undefined ? parseFloat(data.change) : 0;
+        const changePercent = data.change_percent !== undefined ? parseFloat(data.change_percent) : 0;
+        
+        // Check if values are valid numbers
+        if (!isNaN(change) && !isNaN(changePercent)) {
+            changeElement.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
+        } else {
+            // Fallback: calculate from current_price and previous_close if available
+            const currentPrice = parseFloat(data.current_price);
+            const previousClose = data.previous_close ? parseFloat(data.previous_close) : null;
+            
+            if (!isNaN(currentPrice) && previousClose && previousClose > 0) {
+                const calculatedChange = currentPrice - previousClose;
+                const calculatedChangePercent = (calculatedChange / previousClose) * 100;
+                changeElement.textContent = `${calculatedChange >= 0 ? '+' : ''}${calculatedChange.toFixed(2)} (${calculatedChangePercent >= 0 ? '+' : ''}${calculatedChangePercent.toFixed(2)}%)`;
+            } else {
+                changeElement.textContent = 'N/A';
+            }
+        }
+        
+        // Update change class for styling
+        const changeValue = !isNaN(change) ? change : (data.current_price && data.previous_close ? parseFloat(data.current_price) - parseFloat(data.previous_close) : 0);
+        changeElement.className = `badge badge-lg ${changeValue >= 0 ? 'badge-success' : 'badge-error'}`;
+    }
     
     // Update last updated time
     const lastUpdatedElement = card.querySelector('.text-base-content\\/60');
-    lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
+    if (lastUpdatedElement && data.last_updated) {
+        lastUpdatedElement.textContent = `Last updated: ${data.last_updated}`;
+    }
 }
 
 // Note: Auto-refresh is disabled as we now use continuous WebSocket streaming

@@ -1607,21 +1607,25 @@ def start_continuous_websocket():
                     price_updates['nifty'] = {
                         'name': 'NIFTY 50',
                         'current_price': last_price,
+                        'previous_close': websocket_prices['NIFTY 50'].get('previous_close', 0),
                         'last_updated': timestamp
                     }
                     websocket_prices['NIFTY 50'] = {
                         'last_price': last_price,
-                        'timestamp': timestamp
+                        'timestamp': timestamp,
+                        'previous_close': websocket_prices['NIFTY 50'].get('previous_close', 0)
                     }
                 elif instrument_token == bank_nifty_token:
                     price_updates['bank_nifty'] = {
                         'name': 'NIFTY BANK',
                         'current_price': last_price,
+                        'previous_close': websocket_prices['NIFTY BANK'].get('previous_close', 0),
                         'last_updated': timestamp
                     }
                     websocket_prices['NIFTY BANK'] = {
                         'last_price': last_price,
-                        'timestamp': timestamp
+                        'timestamp': timestamp,
+                        'previous_close': websocket_prices['NIFTY BANK'].get('previous_close', 0)
                     }
             
             # Broadcast price updates to all connected clients
@@ -1747,19 +1751,40 @@ def handle_connect():
                 nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
                 bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
                 
+                # Calculate change and change_percent using previous_close from WebSocket if available
+                nifty_current = websocket_prices['NIFTY 50']['last_price'] or nifty_data.get('last_price', 0)
+                nifty_previous = websocket_prices['NIFTY 50'].get('previous_close', 0) or nifty_data.get('ohlc', {}).get('close', 0)
+                nifty_change = nifty_data.get('net_change', 0)
+                if nifty_previous > 0 and nifty_current > 0:
+                    nifty_change = nifty_current - nifty_previous
+                    nifty_change_percent = (nifty_change / nifty_previous) * 100
+                else:
+                    nifty_change_percent = nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0
+                
+                bank_nifty_current = websocket_prices['NIFTY BANK']['last_price'] or bank_nifty_data.get('last_price', 0)
+                bank_nifty_previous = websocket_prices['NIFTY BANK'].get('previous_close', 0) or bank_nifty_data.get('ohlc', {}).get('close', 0)
+                bank_nifty_change = bank_nifty_data.get('net_change', 0)
+                if bank_nifty_previous > 0 and bank_nifty_current > 0:
+                    bank_nifty_change = bank_nifty_current - bank_nifty_previous
+                    bank_nifty_change_percent = (bank_nifty_change / bank_nifty_previous) * 100
+                else:
+                    bank_nifty_change_percent = bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0
+                
                 current_prices = {
                     'nifty': {
                         'name': 'NIFTY 50',
-                        'current_price': websocket_prices['NIFTY 50']['last_price'] or nifty_data.get('last_price', 0),
-                        'change': nifty_data.get('net_change', 0),
-                        'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
+                        'current_price': nifty_current,
+                        'change': nifty_change,
+                        'change_percent': nifty_change_percent,
+                        'previous_close': nifty_previous,
                         'last_updated': websocket_prices['NIFTY 50']['timestamp'] or nifty_data.get('timestamp', 'N/A')
                     },
                     'bank_nifty': {
                         'name': 'NIFTY BANK',
-                        'current_price': websocket_prices['NIFTY BANK']['last_price'] or bank_nifty_data.get('last_price', 0),
-                        'change': bank_nifty_data.get('net_change', 0),
-                        'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
+                        'current_price': bank_nifty_current,
+                        'change': bank_nifty_change,
+                        'change_percent': bank_nifty_change_percent,
+                        'previous_close': bank_nifty_previous,
                         'last_updated': websocket_prices['NIFTY BANK']['timestamp'] or bank_nifty_data.get('timestamp', 'N/A')
                     }
                 }
