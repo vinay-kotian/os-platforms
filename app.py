@@ -1,8 +1,12 @@
+from typing import Any
+
+
 import os
 import json
 import requests
 import sqlite3
 import uuid
+from collections import deque
 from datetime import datetime
 from flask import Flask, redirect, request, session, url_for, render_template, flash, has_request_context
 from flask.json import jsonify
@@ -11,6 +15,7 @@ from kiteconnect import KiteConnect, KiteTicker
 import logging
 import threading
 import time
+
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -28,6 +33,9 @@ DATABASE_FILE = 'app.db'
 user_api_key = None
 user_api_secret = None
 kite = None
+
+price_history: deque[Any] = deque(maxlen=20)  # window of last 20 ticks
+
 
 def init_database():
     """Initialize the SQLite database and create tables"""
@@ -1065,12 +1073,13 @@ def sync_alerts():
         return jsonify({'error': f'Error syncing alerts: {str(e)}'}), 500
 
 # Simple in-memory price history for tracking crossings (in production, use Redis or database)
-price_history = {}
+# Dictionary to store previous prices for alert crossing detection
+alert_previous_prices = {}
 
 @app.route('/alerts/prices', methods=['GET'])
 def get_alert_prices():
     """API endpoint to get current prices for all alerts with crossing detection"""
-    global kite, price_history
+    global kite, alert_previous_prices
     
     # Check if user is logged in and kite is initialized
     if not session.get('access_token'):
@@ -1094,14 +1103,14 @@ def get_alert_prices():
             
             # Get previous price from history
             previous_price = None
-            if symbol in price_history:
-                previous_price = price_history[symbol]
+            if symbol in alert_previous_prices:
+                previous_price = alert_previous_prices[symbol]
             
             # Check if price has crossed the level
             crossing_info = check_price_touch_level(current_price, target_price, operator, previous_price)
             
             # Update price history for next comparison
-            price_history[symbol] = current_price
+            alert_previous_prices[symbol] = current_price
             
             # Add current price, instrument info, and crossing information to alert
             alert['current_price'] = current_price
@@ -1561,6 +1570,7 @@ def start_continuous_websocket():
         """Callback to receive ticks and broadcast to all connected clients"""
         try:
             price_updates = {}
+            global price_history  # Access the global price_history deque
             
             for tick in ticks:
                 instrument_token = tick['instrument_token']
@@ -1579,6 +1589,12 @@ def start_continuous_websocket():
                         'timestamp': timestamp,
                         'previous_close': websocket_prices['NIFTY 50'].get('previous_close', 0)
                     }
+                    # Append Nifty price to deque
+                    price_history.append({
+                        'instrument': 'NIFTY 50',
+                        'price': last_price,
+                        'timestamp': timestamp
+                    })
                 elif instrument_token == bank_nifty_token:
                     price_updates['bank_nifty'] = {
                         'name': 'NIFTY BANK',
@@ -1591,6 +1607,12 @@ def start_continuous_websocket():
                         'timestamp': timestamp,
                         'previous_close': websocket_prices['NIFTY BANK'].get('previous_close', 0)
                     }
+                    # Append Bank Nifty price to deque
+                    price_history.append({
+                        'instrument': 'NIFTY BANK',
+                        'price': last_price,
+                        'timestamp': timestamp
+                    })
             
             # Broadcast price updates to all connected clients
             if price_updates:
