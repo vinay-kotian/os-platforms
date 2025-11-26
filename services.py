@@ -2664,21 +2664,40 @@ def start_continuous_websocket():
                         price_updates['bank_nifty']['change_percent'] = 0
                 
                 # Emit to all connected clients
+                # When called from outside a request context (background thread), 
+                # socketio.emit() broadcasts to all clients by default
                 if socketio:
-                    socketio.emit('price_update', price_updates)
+                    try:
+                        socketio.emit('price_update', price_updates)
+                        # Only log occasionally to avoid spam (every 10th update)
+                        if hasattr(on_ticks, '_update_count'):
+                            on_ticks._update_count += 1
+                        else:
+                            on_ticks._update_count = 1
+                        if on_ticks._update_count % 10 == 0:
+                            print(f"Emitted price update #{on_ticks._update_count}: NIFTY={price_updates.get('nifty', {}).get('current_price', 'N/A')}, BANK_NIFTY={price_updates.get('bank_nifty', {}).get('current_price', 'N/A')}")
+                    except Exception as emit_error:
+                        print(f"Error emitting price update: {emit_error}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print("Warning: socketio is None, cannot emit price updates")
                 
         except Exception as e:
             print(f"Error processing ticks in continuous WebSocket: {e}")
+            import traceback
+            traceback.print_exc()
     
     def on_connect(ws, response):
         """Callback on successful connect"""
         try:
             print("Continuous WebSocket connected, subscribing to instruments...")
+            print(f"NIFTY 50 token: {nifty_token}, NIFTY BANK token: {bank_nifty_token}")
             # Subscribe to NIFTY 50 and NIFTY BANK
             ws.subscribe([nifty_token, bank_nifty_token])
             # Set mode to LTP (Last Traded Price) for both
             ws.set_mode(ws.MODE_LTP, [nifty_token, bank_nifty_token])
-            print("Subscribed to NIFTY 50 and NIFTY BANK")
+            print(f"Subscribed to NIFTY 50 (token: {nifty_token}) and NIFTY BANK (token: {bank_nifty_token})")
             
             # Subscribe to existing open paper trades for real-time price tracking
             subscribe_existing_paper_trades_to_websocket()
