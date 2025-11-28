@@ -931,15 +931,17 @@ def get_paper_trades_endpoint():
     try:
         from services import get_paper_trades
         
-        # Get status filter from query params
+        # Get filters from query params
         status = request.args.get('status')  # 'OPEN' or 'CLOSED'
         instrument = request.args.get('instrument')  # 'NIFTY_50' or 'NIFTY_BANK'
+        date_filter = request.args.get('date')  # 'YYYY-MM-DD' format, defaults to today if None
         
-        trades = get_paper_trades(status=status, instrument=instrument)
+        trades = get_paper_trades(status=status, instrument=instrument, date_filter=date_filter)
         
         return jsonify({
             'trades': trades,
             'count': len(trades),
+            'date_filter': date_filter or datetime.now().date().isoformat(),
             'success': True
         }), 200
         

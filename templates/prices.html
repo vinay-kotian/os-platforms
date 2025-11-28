@@ -183,6 +183,42 @@
     </div>
 </div>
 
+<!-- Paper Trades Section -->
+<div class="card bg-base-100 shadow-xl mb-8">
+    <div class="card-body">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="card-title text-xl">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                Paper Trades
+            </h2>
+            <div class="flex items-center gap-2">
+                <div class="form-control">
+                    <label class="label">
+                        <span class="label-text text-xs">Date Filter</span>
+                    </label>
+                    <input type="date" id="paperTradesDateFilter" class="input input-bordered input-sm w-40" />
+                </div>
+                <button id="refreshPaperTrades" class="btn btn-sm btn-primary">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    Refresh
+                </button>
+            </div>
+        </div>
+        
+        <div id="paperTradesContainer" class="overflow-x-auto">
+            <div class="text-center text-base-content/60 py-8">
+                <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <p>Loading paper trades...</p>
+            </div>
+        </div>
+    </div>
+</div>
 
 {% else %}
 <div class="hero bg-base-100 rounded-2xl shadow-xl">
@@ -1143,5 +1179,256 @@ function loadLevelsFromDatabase(todayOnly = false) {
             renderNiftyLevels();
         });
 }
+
+// Paper Trades Functions
+function loadPaperTrades() {
+    // Get date filter value (defaults to today)
+    const dateFilter = document.getElementById('paperTradesDateFilter')?.value || new Date().toISOString().split('T')[0];
+    
+    // Build query string
+    const params = new URLSearchParams();
+    if (dateFilter) {
+        params.append('date', dateFilter);
+    }
+    
+    fetch(`/trading/get-paper-trades?${params.toString()}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                renderPaperTrades(data.trades || [], data.date_filter);
+            } else {
+                showPaperTradesError(data.error || 'Failed to load paper trades');
+            }
+        })
+        .catch(error => {
+            console.error('Error loading paper trades:', error);
+            showPaperTradesError('Error loading paper trades: ' + error.message);
+        });
+}
+
+function renderPaperTrades(trades, dateFilter) {
+    const container = document.getElementById('paperTradesContainer');
+    if (!container) return;
+    
+    if (trades.length === 0) {
+        const dateDisplay = dateFilter ? ` for ${new Date(dateFilter).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : '';
+        container.innerHTML = `
+            <div class="text-center text-base-content/60 py-8">
+                <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <p>No paper trades found${dateDisplay}</p>
+            </div>
+        `;
+        return;
+    }
+    
+    // Group trades by status
+    const openTrades = trades.filter(t => t.status === 'OPEN');
+    const closedTrades = trades.filter(t => t.status === 'CLOSED');
+    
+    let html = '';
+    
+    // Open Trades Section
+    if (openTrades.length > 0) {
+        html += `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                    <span class="badge badge-success badge-lg">${openTrades.length}</span>
+                    Open Trades
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra w-full">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Instrument</th>
+                                <th>Qty</th>
+                                <th>Entry Price</th>
+                                <th>Current Price</th>
+                                <th>Target</th>
+                                <th>Stop Loss</th>
+                                <th>P&L</th>
+                                <th>Entry Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        openTrades.forEach(trade => {
+            const currentPrice = trade.current_price || 0;
+            const entryPrice = trade.entry_price || 0;
+            const pnl = currentPrice > 0 && entryPrice > 0 ? (currentPrice - entryPrice) * trade.quantity : 0;
+            const pnlPercent = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
+            const pnlClass = pnl >= 0 ? 'text-success' : 'text-error';
+            
+            html += `
+                <tr>
+                    <td class="font-mono text-sm">${trade.tradingsymbol || 'N/A'}</td>
+                    <td>
+                        <span class="badge ${trade.option_type === 'CALL' ? 'badge-success' : 'badge-error'}">
+                            ${trade.option_type || 'N/A'}
+                        </span>
+                    </td>
+                    <td>${trade.instrument || 'N/A'}</td>
+                    <td>${trade.quantity || 0}</td>
+                    <td>₹${parseFloat(trade.entry_price || 0).toFixed(2)}</td>
+                    <td>${currentPrice > 0 ? '₹' + parseFloat(currentPrice).toFixed(2) : 'N/A'}</td>
+                    <td>₹${parseFloat(trade.target_price || 0).toFixed(2)}</td>
+                    <td>₹${parseFloat(trade.stoploss_price || 0).toFixed(2)}</td>
+                    <td class="${pnlClass} font-semibold">
+                        ${currentPrice > 0 ? (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + ' (' + (pnlPercent >= 0 ? '+' : '') + pnlPercent.toFixed(2) + '%)' : 'N/A'}
+                    </td>
+                    <td class="text-xs">${formatDateTime(trade.entry_time)}</td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Closed Trades Section
+    if (closedTrades.length > 0) {
+        html += `
+            <div class="mb-6">
+                <h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
+                    <span class="badge badge-lg">${closedTrades.length}</span>
+                    Closed Trades
+                </h3>
+                <div class="overflow-x-auto">
+                    <table class="table table-zebra w-full">
+                        <thead>
+                            <tr>
+                                <th>Symbol</th>
+                                <th>Type</th>
+                                <th>Instrument</th>
+                                <th>Qty</th>
+                                <th>Entry Price</th>
+                                <th>Exit Price</th>
+                                <th>Exit Reason</th>
+                                <th>P&L</th>
+                                <th>Entry Time</th>
+                                <th>Exit Time</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+        `;
+        
+        closedTrades.forEach(trade => {
+            const pnl = trade.profit_loss || 0;
+            const pnlPercent = trade.profit_loss_percent || 0;
+            const pnlClass = pnl >= 0 ? 'text-success' : 'text-error';
+            const exitReasonBadge = trade.exit_reason === 'TARGET' ? 'badge-success' : 
+                                   trade.exit_reason === 'STOPLOSS' ? 'badge-error' : 'badge-warning';
+            
+            html += `
+                <tr>
+                    <td class="font-mono text-sm">${trade.tradingsymbol || 'N/A'}</td>
+                    <td>
+                        <span class="badge ${trade.option_type === 'CALL' ? 'badge-success' : 'badge-error'}">
+                            ${trade.option_type || 'N/A'}
+                        </span>
+                    </td>
+                    <td>${trade.instrument || 'N/A'}</td>
+                    <td>${trade.quantity || 0}</td>
+                    <td>₹${parseFloat(trade.entry_price || 0).toFixed(2)}</td>
+                    <td>₹${parseFloat(trade.exit_price || 0).toFixed(2)}</td>
+                    <td>
+                        <span class="badge ${exitReasonBadge}">
+                            ${trade.exit_reason || 'N/A'}
+                        </span>
+                    </td>
+                    <td class="${pnlClass} font-semibold">
+                        ${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} (${(pnlPercent >= 0 ? '+' : '') + pnlPercent.toFixed(2)}%)
+                    </td>
+                    <td class="text-xs">${formatDateTime(trade.entry_time)}</td>
+                    <td class="text-xs">${formatDateTime(trade.exit_time)}</td>
+                </tr>
+            `;
+        });
+        
+        html += `
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function showPaperTradesError(message) {
+    const container = document.getElementById('paperTradesContainer');
+    if (!container) return;
+    
+    container.innerHTML = `
+        <div class="alert alert-error">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            <span>${message}</span>
+        </div>
+    `;
+}
+
+function formatDateTime(dateTimeString) {
+    if (!dateTimeString) return 'N/A';
+    try {
+        const date = new Date(dateTimeString);
+        return date.toLocaleString('en-US', {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+    } catch (e) {
+        return dateTimeString;
+    }
+}
+
+// Refresh button handler
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize date filter to today's date
+    const dateFilterInput = document.getElementById('paperTradesDateFilter');
+    if (dateFilterInput) {
+        const today = new Date().toISOString().split('T')[0];
+        dateFilterInput.value = today;
+        
+        // Add change event listener to reload trades when date changes
+        dateFilterInput.addEventListener('change', function() {
+            loadPaperTrades();
+        });
+    }
+    
+    const refreshBtn = document.getElementById('refreshPaperTrades');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function() {
+            const btn = this;
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<span class="loading loading-spinner loading-sm"></span> Refreshing...';
+            btn.disabled = true;
+            
+            loadPaperTrades();
+            
+            setTimeout(() => {
+                btn.innerHTML = originalHTML;
+                btn.disabled = false;
+            }, 1000);
+        });
+    }
+    
+    // Load paper trades on page load
+    loadPaperTrades();
+    
+    // Auto-refresh paper trades every 30 seconds
+    setInterval(loadPaperTrades, 30000);
+});
 </script>
 {% endblock %}

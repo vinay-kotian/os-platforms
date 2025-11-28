@@ -78,11 +78,19 @@ previous_trends = {
     'NIFTY_BANK': None
 }
 
-# Track if order was already placed at entry level (to avoid duplicate orders)
-# Dictionary: {'NIFTY_50': True/False, 'NIFTY_BANK': True/False}
-order_placed_at_level = {
-    'NIFTY_50': False,
-    'NIFTY_BANK': False
+# Track if order was already placed at a level (to avoid duplicate orders)
+# Dictionary: {'level_uuid': True/False} - tracks which specific level had an order placed
+order_placed_at_level = {}
+
+# Track previous price position relative to each level
+# Dictionary: {'level_uuid': 'above'/'below'/'at'}
+previous_price_position_by_level = {}
+
+# Track last order time to prevent placing orders too frequently
+# Dictionary: {'NIFTY_50': timestamp, 'NIFTY_BANK': timestamp}
+last_order_time = {
+    'NIFTY_50': None,
+    'NIFTY_BANK': None
 }
 
 # Track previous price position relative to entry level (to detect approach direction)
@@ -723,12 +731,15 @@ def place_call_order(price, instrument="NIFTY 50"):
     Args:
         price: Entry price (underlying spot price) - used to find ATM strike
         instrument: Instrument name (NIFTY 50 or NIFTY BANK)
+    
+    Returns:
+        bool: True if order was successfully placed/saved, False otherwise
     """
     global kite
     
     if not kite:
         print(f"❌ CALL ORDER: KiteConnect not initialized for {instrument}")
-        return
+        return False
     
     try:
         # Configuration - these should be set based on your requirements
@@ -741,7 +752,7 @@ def place_call_order(price, instrument="NIFTY 50"):
         tradingsymbol = get_option_tradingsymbol(kite, instrument, price, option_type="CE")
         if not tradingsymbol:
             print(f"❌ CALL ORDER: Could not determine tradingsymbol for {instrument} at entry price {price}")
-            return
+            return False
         
         # Fetch current option premium from market
         try:
@@ -755,7 +766,34 @@ def place_call_order(price, instrument="NIFTY 50"):
                 
             if option_premium == 0:
                 print(f"⚠️  CALL ORDER: Could not fetch option premium for {tradingsymbol}")
-                print(f"   Placing order without GTT - please set target and stop loss manually")
+                if PAPER_TRADING_ENABLED:
+                    # For paper trading, use a default premium if we can't fetch it
+                    option_premium = price * 0.01  # Use 1% of underlying as default premium
+                    print(f"   Using default premium for paper trading: {option_premium:.2f}")
+                else:
+                    print(f"   Placing order without GTT - please set target and stop loss manually")
+                    # Place order without GTT as fallback
+                    order_id = kite.place_order(
+                        variety=kite.VARIETY_REGULAR,
+                        exchange=exchange,
+                        tradingsymbol=tradingsymbol,
+                        transaction_type=kite.TRANSACTION_TYPE_BUY,
+                        quantity=quantity,
+                        order_type=kite.ORDER_TYPE_MARKET,
+                        product=kite.PRODUCT_MIS
+                    )
+                    print(f"🔼 CALL ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
+                    print(f"   Tradingsymbol: {tradingsymbol}")
+                    return True
+                
+        except Exception as e:
+            print(f"⚠️  CALL ORDER: Error fetching option premium: {e}")
+            if PAPER_TRADING_ENABLED:
+                # For paper trading, use a default premium if we can't fetch it
+                option_premium = price * 0.01  # Use 1% of underlying as default premium
+                print(f"   Using default premium for paper trading: {option_premium:.2f}")
+            else:
+                print(f"   Placing order without GTT")
                 # Place order without GTT as fallback
                 order_id = kite.place_order(
                     variety=kite.VARIETY_REGULAR,
@@ -767,24 +805,7 @@ def place_call_order(price, instrument="NIFTY 50"):
                     product=kite.PRODUCT_MIS
                 )
                 print(f"🔼 CALL ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
-                print(f"   Tradingsymbol: {tradingsymbol}")
-                return
-                
-        except Exception as e:
-            print(f"⚠️  CALL ORDER: Error fetching option premium: {e}")
-            print(f"   Placing order without GTT")
-            # Place order without GTT as fallback
-            order_id = kite.place_order(
-                variety=kite.VARIETY_REGULAR,
-                exchange=exchange,
-                tradingsymbol=tradingsymbol,
-                transaction_type=kite.TRANSACTION_TYPE_BUY,
-                quantity=quantity,
-                order_type=kite.ORDER_TYPE_MARKET,
-                product=kite.PRODUCT_MIS
-            )
-            print(f"🔼 CALL ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
-            return
+                return True
         
         # Calculate 15% profit target and 5% stop loss based on option premium
         target_price = round(option_premium * 1.15, 2)  # 15% profit
@@ -795,31 +816,61 @@ def place_call_order(price, instrument="NIFTY 50"):
         print(f"   Target (15%): {target_price:.2f}")
         print(f"   Stop Loss (5%): {stoploss_price:.2f}")
         
-        # Place order with target and stop loss
-        result = place_option_with_tp_sl(
-            kite=kite,
-            exchange=exchange,
-            tradingsymbol=tradingsymbol,
-            quantity=quantity,
-            transaction_type=kite.TRANSACTION_TYPE_BUY,
-            order_type=order_type,
-            product=product,
-            target_price=target_price,
-            stoploss_trigger=stoploss_trigger,
-            stoploss_price=stoploss_price
-        )
-        
-        print(f"🔼 CALL ORDER PLACED for {instrument} at entry price {price}")
-        print(f"   Tradingsymbol: {tradingsymbol}")
-        print(f"   Order ID: {result['order_id']}")
-        print(f"   Target (15%): {target_price:.2f}")
-        print(f"   Stop Loss (5%): {stoploss_price:.2f}")
-        print(f"   GTT IDs: {result['gtt_ids']}")
+        # Check if paper trading is enabled
+        if PAPER_TRADING_ENABLED:
+            # Paper trading: Save to paper_trades table without placing real order
+            trade_uuid = save_paper_trade_entry(
+                instrument=instrument,
+                option_type="CALL",
+                tradingsymbol=tradingsymbol,
+                exchange=exchange,
+                quantity=quantity,
+                entry_price=option_premium,
+                underlying_entry_price=price,
+                target_price=target_price,
+                stoploss_price=stoploss_price
+            )
+            
+            print(f"📝 PAPER TRADE - CALL ORDER for {instrument} at entry price {price}")
+            print(f"   Tradingsymbol: {tradingsymbol}")
+            print(f"   Entry Premium: {option_premium:.2f}")
+            print(f"   Target (15%): {target_price:.2f}")
+            print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+            print(f"   Trade UUID: {trade_uuid}")
+            return trade_uuid is not None  # Return True if trade was saved successfully
+        else:
+            # Live trading: Place actual order
+            result = place_option_with_tp_sl(
+                kite=kite,
+                exchange=exchange,
+                tradingsymbol=tradingsymbol,
+                quantity=quantity,
+                transaction_type=kite.TRANSACTION_TYPE_BUY,
+                order_type=order_type,
+                product=product,
+                target_price=target_price,
+                stoploss_trigger=stoploss_trigger,
+                stoploss_price=stoploss_price,
+                instrument=instrument,
+                option_type="CALL",
+                underlying_entry_price=price
+            )
+            
+            print(f"🔼 LIVE TRADE - CALL ORDER PLACED for {instrument} at entry price {price}")
+            print(f"   Tradingsymbol: {tradingsymbol}")
+            print(f"   Order ID: {result['order_id']}")
+            print(f"   Entry Premium: {result.get('entry_price', option_premium):.2f}")
+            print(f"   Target (15%): {target_price:.2f}")
+            print(f"   Stop Loss (5%): {stoploss_price:.2f}")
+            print(f"   Trade UUID: {result.get('trade_uuid', 'N/A')}")
+            print(f"   GTT IDs: {result['gtt_ids']}")
+            return True  # Order placed successfully
         
     except Exception as e:
         print(f"❌ Error placing CALL order for {instrument}: {e}")
         import traceback
         traceback.print_exc()
+        return False
 
 
 def place_put_order(price, instrument="NIFTY 50"):
@@ -830,12 +881,15 @@ def place_put_order(price, instrument="NIFTY 50"):
     Args:
         price: Entry price (underlying spot price) - used to find ATM strike
         instrument: Instrument name (NIFTY 50 or NIFTY BANK)
+    
+    Returns:
+        bool: True if order was successfully placed/saved, False otherwise
     """
     global kite
     
     if not kite:
         print(f"❌ PUT ORDER: KiteConnect not initialized for {instrument}")
-        return
+        return False
     
     try:
         # Configuration - these should be set based on your requirements
@@ -848,7 +902,7 @@ def place_put_order(price, instrument="NIFTY 50"):
         tradingsymbol = get_option_tradingsymbol(kite, instrument, price, option_type="PE")
         if not tradingsymbol:
             print(f"❌ PUT ORDER: Could not determine tradingsymbol for {instrument} at entry price {price}")
-            return
+            return False
         
         # Fetch current option premium from market
         try:
@@ -875,7 +929,7 @@ def place_put_order(price, instrument="NIFTY 50"):
                 )
                 print(f"🔽 PUT ORDER PLACED for {instrument} at {price} (order_id: {order_id})")
                 print(f"   Tradingsymbol: {tradingsymbol}")
-                return
+                return True
                 
         except Exception as e:
             print(f"⚠️  PUT ORDER: Error fetching option premium: {e}")
@@ -923,6 +977,7 @@ def place_put_order(price, instrument="NIFTY 50"):
             print(f"   Target (15%): {target_price:.2f}")
             print(f"   Stop Loss (5%): {stoploss_price:.2f}")
             print(f"   Trade UUID: {trade_uuid}")
+            return trade_uuid is not None  # Return True if trade was saved successfully
         else:
             # Live trading: Place actual order
             result = place_option_with_tp_sl(
@@ -949,16 +1004,18 @@ def place_put_order(price, instrument="NIFTY 50"):
             print(f"   Stop Loss (5%): {stoploss_price:.2f}")
             print(f"   Trade UUID: {result.get('trade_uuid', 'N/A')}")
             print(f"   GTT IDs: {result['gtt_ids']}")
+            return True  # Order placed successfully
         
     except Exception as e:
         print(f"❌ Error placing PUT order for {instrument}: {e}")
         import traceback
         traceback.print_exc()
+        return False
 
 
 def check_trend_reversal(instrument_name, cache_key, prices_deque):
     """
-    Check if price touches entry level and place reversal order based on approach direction.
+    Check if price touches any stored level and place reversal order based on approach direction.
     This function is called by the background monitoring thread.
     
     Trading Logic (Reversal Strategy):
@@ -970,62 +1027,161 @@ def check_trend_reversal(instrument_name, cache_key, prices_deque):
         cache_key: Cache key ("NIFTY_50" or "NIFTY_BANK")
         prices_deque: The price deque for this instrument
     """
-    global previous_trends, entry_prices_cache, order_placed_at_level, previous_price_position
+    global previous_trends, order_placed_at_level, previous_price_position_by_level, last_order_time
     
     # Skip if deque is empty
     if len(prices_deque) == 0:
         return
     
-    # Get entry price for this instrument from cache
-    entry_price = entry_prices_cache.get(cache_key)
+    # Get all levels for this instrument from database
+    user_id = 'default_user'
+    levels_data = get_levels(user_id, index_type=cache_key, today_only=False)
+    levels = levels_data.get(cache_key, [])
     
-    # Skip if entry price is not set
-    if entry_price is None:
+    # Skip if no levels are set
+    if not levels or len(levels) == 0:
         return
     
     # Get current price (last price in deque)
     current_price = list(prices_deque)[-1]
     
-    # Check if price is at/near entry level (within 0.1% tolerance)
-    price_tolerance = entry_price * 0.001  # 0.1% of entry price
-    price_diff = abs(current_price - entry_price)
-    is_at_entry_level = price_diff <= price_tolerance
-    
-    # Determine current price position relative to entry level
-    if is_at_entry_level:
-        current_position = 'at'
-    elif current_price > entry_price:
-        current_position = 'above'
-    else:
-        current_position = 'below'
-    
-    # Get previous price position
-    previous_position = previous_price_position.get(cache_key)
-    
-    # Check if price just touched the level (transitioned from above/below to at level)
-    if is_at_entry_level and previous_position is not None and previous_position != 'at':
-        # Price just touched the level from a different position
+    # Check each level to see if price touches it
+    for level in levels:
+        level_uuid = level['uuid']
+        level_value = level['value']
         
-        # Only place order if we haven't already placed one at this level
-        if not order_placed_at_level.get(cache_key, False):
-            # Price came from UP (above) and touched level → Buy CALL (reversal up expected)
-            if previous_position == 'above':
-                place_call_order(current_price, instrument_name)
-                order_placed_at_level[cache_key] = True
-                print(f"🔼 CALL ORDER: {instrument_name} price touched entry level {entry_price} from UP (reversal trade) - current: {current_price}")
+        # Skip this level if an order was already placed for it
+        # Check both in-memory flag and database to handle server restarts
+        if order_placed_at_level.get(level_uuid, False):
+            # Verify trade exists in database
+            if check_paper_trade_exists_for_level(level_value, cache_key):
+                continue  # Don't monitor this level anymore - trade exists
+            else:
+                # Flag is set but no trade exists - reset flag and continue monitoring
+                print(f"⚠️  {instrument_name} Level {level_value:.2f}: Flag set but no trade found, resetting flag")
+                order_placed_at_level[level_uuid] = False
+        else:
+            # Flag not set, but check database anyway (in case of server restart)
+            if check_paper_trade_exists_for_level(level_value, cache_key):
+                # Trade exists in DB but flag not set - set the flag
+                order_placed_at_level[level_uuid] = True
+                print(f"ℹ️  {instrument_name} Level {level_value:.2f}: Found existing trade in DB, setting flag")
+                continue
+        
+        # Check if price is at/near this level (within 0.1% tolerance)
+        price_tolerance = level_value * 0.001  # 0.1% of level value
+        price_diff = abs(current_price - level_value)
+        price_diff_percent = (price_diff / level_value) * 100 if level_value > 0 else 0
+        is_at_level = price_diff <= price_tolerance
+        
+        # Determine current price position relative to this level
+        if is_at_level:
+            current_position = 'at'
+        elif current_price > level_value:
+            current_position = 'above'
+        else:
+            current_position = 'below'
+        
+        # Get previous price position for this specific level
+        previous_position = previous_price_position_by_level.get(level_uuid)
+        
+        # Initialize previous_position if it's None (first time checking this level)
+        if previous_position is None:
+            previous_position = current_position
+            previous_price_position_by_level[level_uuid] = current_position
+        
+        # Debug logging (only log occasionally to avoid spam)
+        if not hasattr(check_trend_reversal, '_log_count'):
+            check_trend_reversal._log_count = {}
+        log_key = f"{cache_key}_{level_uuid}"
+        if log_key not in check_trend_reversal._log_count:
+            check_trend_reversal._log_count[log_key] = 0
+        check_trend_reversal._log_count[log_key] += 1
+        
+        # Log every 10th check or when near level (within 0.5%)
+        should_log = (check_trend_reversal._log_count[log_key] % 10 == 0) or (price_diff_percent <= 0.5)
+        if should_log:
+            print(f"📊 {instrument_name} Level {level_value:.2f}: Current={current_price:.2f}, Diff={price_diff:.2f} ({price_diff_percent:.3f}%), Position={current_position}, Prev={previous_position}, OrderPlaced={order_placed_at_level.get(level_uuid, False)}")
+        
+        # Check if price just touched this level (transitioned from above/below to at level)
+        price_touched_level = False
+        if is_at_level:
+            if previous_position is not None and previous_position != 'at':
+                # Normal case: price transitioned from above/below to at level
+                price_touched_level = True
+            elif previous_position == 'at' and not order_placed_at_level.get(level_uuid, False):
+                # Edge case: price was already at level when we started monitoring
+                # Check if we have enough price history to determine direction
+                if len(prices_deque) >= 2:
+                    price_list = list(prices_deque)
+                    prev_price = price_list[-2]
+                    if prev_price > level_value:
+                        previous_position = 'above'
+                        price_touched_level = True
+                    elif prev_price < level_value:
+                        previous_position = 'below'
+                        price_touched_level = True
+        
+        if price_touched_level:
+            # Check if we can place an order for this level (not already placed AND not too soon since last order)
+            can_place_order = not order_placed_at_level.get(level_uuid, False)
             
-            # Price came from DOWN (below) and touched level → Buy PUT (reversal down expected)
-            elif previous_position == 'below':
-                place_put_order(current_price, instrument_name)
-                order_placed_at_level[cache_key] = True
-                print(f"🔽 PUT ORDER: {instrument_name} price touched entry level {entry_price} from DOWN (reversal trade) - current: {current_price}")
-    
-    # Reset order flag when price moves away from entry level
-    if not is_at_entry_level:
-        order_placed_at_level[cache_key] = False
-    
-    # Update previous price position for next comparison
-    previous_price_position[cache_key] = current_position
+            # Additional check: prevent placing orders too frequently (within 60 seconds) for this instrument
+            if can_place_order:
+                last_order_ts = last_order_time.get(cache_key)
+                if last_order_ts is not None:
+                    time_since_last_order = (datetime.now() - datetime.fromisoformat(last_order_ts)).total_seconds()
+                    if time_since_last_order < 60:  # 60 seconds cooldown per instrument
+                        can_place_order = False
+                        if should_log:
+                            print(f"⏱️  {instrument_name}: Order placed recently ({time_since_last_order:.1f}s ago), waiting for cooldown period")
+            
+            if can_place_order:
+                # Set flag IMMEDIATELY to prevent race conditions (multiple simultaneous orders)
+                # This ensures only one order is placed even if function takes time
+                order_placed_at_level[level_uuid] = True
+                last_order_time[cache_key] = datetime.now().isoformat()
+                
+                # Price came from UP (above) and touched level → Buy CALL (reversal up expected)
+                if previous_position == 'above':
+                    print(f"🔼 TRIGGER: {instrument_name} price touched level {level_value:.2f} from UP - executing CALL order at {current_price:.2f}")
+                    order_success = place_call_order(current_price, instrument_name)
+                    if order_success:
+                        print(f"✅ CALL ORDER PLACED: {instrument_name} at level {level_value:.2f} (current: {current_price:.2f})")
+                    else:
+                        # Order failed - reset flag to allow retry
+                        print(f"⚠️  CALL ORDER FAILED: {instrument_name} at level {level_value:.2f} - resetting flag for retry")
+                        order_placed_at_level[level_uuid] = False
+                
+                # Price came from DOWN (below) and touched level → Buy PUT (reversal down expected)
+                elif previous_position == 'below':
+                    print(f"🔽 TRIGGER: {instrument_name} price touched level {level_value:.2f} from DOWN - executing PUT order at {current_price:.2f}")
+                    order_success = place_put_order(current_price, instrument_name)
+                    if order_success:
+                        print(f"✅ PUT ORDER PLACED: {instrument_name} at level {level_value:.2f} (current: {current_price:.2f})")
+                    else:
+                        # Order failed - reset flag to allow retry
+                        print(f"⚠️  PUT ORDER FAILED: {instrument_name} at level {level_value:.2f} - resetting flag for retry")
+                        order_placed_at_level[level_uuid] = False
+            else:
+                if should_log:
+                    if order_placed_at_level.get(level_uuid, False):
+                        print(f"⚠️  {instrument_name} Level {level_value:.2f}: Price at level but order already placed (skipping)")
+                    else:
+                        print(f"⚠️  {instrument_name} Level {level_value:.2f}: Price at level but cannot place order (check cooldown)")
+        elif is_at_level and should_log:
+            # Price is at level but didn't trigger (already placed or other reason)
+            if order_placed_at_level.get(level_uuid, False):
+                print(f"ℹ️  {instrument_name} Level {level_value:.2f}: Price at level, order already placed")
+            elif previous_position == 'at':
+                print(f"ℹ️  {instrument_name} Level {level_value:.2f}: Price at level, waiting for transition from above/below")
+        
+        # Once an order is placed for a level, we stop monitoring it permanently
+        # (No reset logic - level is disabled after first order)
+        
+        # Update previous price position for this level (only if we're still monitoring it)
+        if not order_placed_at_level.get(level_uuid, False):
+            previous_price_position_by_level[level_uuid] = current_position
     
     # Also update previous trend (for reference/debugging)
     current_trend = get_trend(prices_deque)
@@ -1241,6 +1397,9 @@ def init_database():
         
         # Load entry prices from database into cache
         load_entry_prices_from_db()
+        
+        # Initialize order flags from existing paper trades
+        initialize_order_flags_from_trades()
         
     except Exception as e:
         print(f"Error initializing database: {e}")
@@ -2251,7 +2410,73 @@ def stop_paper_trade_monitoring():
         paper_trade_monitoring_thread.join(timeout=2)
 
 
-def get_paper_trades(user_id='default_user', status=None, instrument=None):
+def initialize_order_flags_from_trades(user_id='default_user'):
+    """
+    Initialize order_placed_at_level flags from existing paper trades in database.
+    This ensures that after server restart, we know which levels already have trades.
+    """
+    global order_placed_at_level
+    
+    try:
+        # Get all levels
+        levels_data = get_levels(user_id, today_only=False)
+        
+        # Check each level to see if a trade exists for it
+        for instrument_key in ['NIFTY_50', 'NIFTY_BANK']:
+            levels = levels_data.get(instrument_key, [])
+            for level in levels:
+                level_uuid = level['uuid']
+                level_value = level['value']
+                
+                # Check if trade exists for this level
+                if check_paper_trade_exists_for_level(level_value, instrument_key, user_id):
+                    order_placed_at_level[level_uuid] = True
+                    print(f"✅ Initialized flag for {instrument_key} level {level_value:.2f} (trade exists)")
+        
+        print(f"📋 Initialized order flags: {len([k for k, v in order_placed_at_level.items() if v])} levels with existing trades")
+        
+    except Exception as e:
+        print(f"Error initializing order flags from trades: {e}")
+
+
+def check_paper_trade_exists_for_level(level_value, instrument_key, user_id='default_user', tolerance=0.01):
+    """
+    Check if a paper trade exists for a given level value.
+    Uses underlying_entry_price to match the level (within tolerance).
+    
+    Args:
+        level_value: The level value to check
+        instrument_key: 'NIFTY_50' or 'NIFTY_BANK'
+        user_id: User ID
+        tolerance: Tolerance for matching level (default 0.01 = 1%)
+    
+    Returns:
+        bool: True if a trade exists for this level, False otherwise
+    """
+    try:
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        # Check if any paper trade exists with underlying_entry_price matching this level
+        # Use tolerance to account for small price differences
+        tolerance_value = level_value * tolerance
+        cursor.execute('''
+            SELECT COUNT(*) FROM paper_trades 
+            WHERE user_id = ? AND instrument = ? 
+            AND ABS(underlying_entry_price - ?) <= ?
+        ''', (user_id, instrument_key, level_value, tolerance_value))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count > 0
+        
+    except Exception as e:
+        print(f"Error checking paper trade for level: {e}")
+        return False
+
+
+def get_paper_trades(user_id='default_user', status=None, instrument=None, date_filter=None):
     """
     Get paper trades from database.
     
@@ -2259,6 +2484,7 @@ def get_paper_trades(user_id='default_user', status=None, instrument=None):
         user_id: User ID
         status: Filter by status ('OPEN', 'CLOSED') or None for all
         instrument: Filter by instrument ('NIFTY_50', 'NIFTY_BANK') or None for all
+        date_filter: Filter by date (YYYY-MM-DD format). If None, defaults to today's date.
     
     Returns:
         list: List of paper trade dictionaries
@@ -2277,6 +2503,15 @@ def get_paper_trades(user_id='default_user', status=None, instrument=None):
         if instrument:
             query += ' AND instrument = ?'
             params.append(instrument)
+        
+        # Add date filter - default to today if not specified
+        if date_filter is None:
+            date_filter = datetime.now().date().isoformat()
+        
+        # Filter by date using SQLite date() function
+        # entry_time is stored as ISO format datetime string, so we extract the date part
+        query += ' AND date(entry_time) = ?'
+        params.append(date_filter)
         
         query += ' ORDER BY entry_time DESC'
         
@@ -2724,24 +2959,60 @@ def start_continuous_websocket():
     def on_close(ws, code, reason):
         """Callback on connection close"""
         global continuous_websocket_running, continuous_kws
-        print(f"Continuous WebSocket closed: {code} - {reason}")
+        close_msg = f"Continuous WebSocket closed: {code} - {reason}"
+        print(f"🔌 {close_msg}")
+        
+        # Check if it's an authentication error
+        if code == 403 or (reason and ("403" in str(reason) or "Forbidden" in str(reason) or "upgrade failed" in str(reason).lower())):
+            print("⚠️  WebSocket connection was closed due to authentication failure (403 Forbidden)")
+            print("   This usually means your access token has expired.")
+            print("   Please login again at /login to refresh your credentials.")
+        
         continuous_websocket_running = False
         continuous_kws = None
         # Note: Don't try to reconnect automatically as Twisted reactor can't be restarted
         # The WebSocket will need to be restarted manually or on next server restart
-        print("WebSocket closed. Restart server to reconnect.")
+        print("   WebSocket closed. Restart server to reconnect after fixing authentication.")
     
     def on_error(ws, code, reason):
         """Callback on error"""
-        print(f"Continuous WebSocket error: {code} - {reason}")
+        error_msg = f"Continuous WebSocket error: {code} - {reason}"
+        print(f"❌ {error_msg}")
+        if code == 403 or (reason and ("403" in str(reason) or "Forbidden" in str(reason))):
+            print("⚠️  WebSocket authentication failed (403 Forbidden). Possible causes:")
+            print("   1. Access token has expired - please login again at /login")
+            print("   2. Invalid API key or access token")
+            print("   3. Account restrictions on WebSocket access")
+            print("   Please check your credentials and try logging in again.")
     
     def connect_websocket():
         """Connect WebSocket in a separate thread"""
-        global continuous_kws, continuous_websocket_running
+        global continuous_kws, continuous_websocket_running, kite
         try:
             # Check if already running to prevent multiple starts
             if continuous_kws is not None:
                 print("WebSocket already initialized, skipping...")
+                return
+            
+            # Validate access token before connecting
+            print("Validating access token before WebSocket connection...")
+            try:
+                # Ensure kite is initialized and test the token
+                if not kite:
+                    kite = KiteConnect(api_key=api_key)
+                    kite.set_access_token(access_token)
+                
+                # Test token by calling a simple API endpoint
+                profile = kite.profile()
+                print(f"✅ Access token validated successfully for user: {profile.get('user_name', 'Unknown')}")
+            except Exception as token_error:
+                error_msg = str(token_error)
+                print(f"❌ Access token validation failed: {error_msg}")
+                if "TokenException" in error_msg or "Invalid" in error_msg or "expired" in error_msg.lower():
+                    print("⚠️  Access token appears to be expired or invalid. Please login again at /login")
+                    print("   The WebSocket connection will not be established until you re-authenticate.")
+                continuous_websocket_running = False
+                continuous_kws = None
                 return
                 
             continuous_kws = KiteTicker(api_key, access_token)
@@ -2754,7 +3025,13 @@ def start_continuous_websocket():
             # Use threaded=True to run in separate thread (required for Twisted reactor)
             continuous_kws.connect(threaded=True)
         except Exception as e:
-            print(f"Error connecting continuous WebSocket: {e}")
+            error_msg = str(e)
+            print(f"❌ Error connecting continuous WebSocket: {error_msg}")
+            if "403" in error_msg or "Forbidden" in error_msg:
+                print("⚠️  WebSocket connection was forbidden (403). This usually means:")
+                print("   1. The access token has expired - please login again at /login")
+                print("   2. The API key or access token is invalid")
+                print("   3. Your account may have restrictions on WebSocket access")
             continuous_websocket_running = False
             continuous_kws = None
     
