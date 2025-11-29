@@ -51,120 +51,79 @@ def before_request():
     if not session.get('access_token') and os.path.exists(services.SESSION_FILE):
         sync_session_from_file()
 
+# Register authentication blueprint
+login_required = None
+get_current_user_id = None
+
+try:
+    from app.auth.routes import auth_bp
+    from app.auth.middleware import login_required, get_current_user_id
+    app.register_blueprint(auth_bp)
+    print("✓ Auth blueprint registered successfully")
+except ImportError as e:
+    # Fallback if auth module not available
+    print(f"Warning: Auth module not found, using default user. Error: {e}")
+    import traceback
+    traceback.print_exc()
+    
+    def login_required(f):
+        return f
+    
+    def get_current_user_id():
+        return 'default_user'
+except Exception as e:
+    print(f"Error registering auth blueprint: {e}")
+    import traceback
+    traceback.print_exc()
+    # Still provide fallback functions
+    def login_required(f):
+        return f
+    def get_current_user_id():
+        return 'default_user'
+
+# Ensure functions are defined even if import failed
+if login_required is None:
+    def login_required(f):
+        return f
+
+if get_current_user_id is None:
+    def get_current_user_id():
+        return 'default_user'
+
 @app.route('/')
 def index():
     """Home page - redirect based on login status"""
-    # Check if user is logged in (has access token and kite instance)
-    if session.get('access_token') and kite:
-        # User is logged in, redirect to prices page
-        return redirect(url_for('prices'))
+    # Check if user is logged in (has user session)
+    if session.get('user_id'):
+        # Check if Zerodha is connected
+        if session.get('access_token') and kite:
+            # User is logged in and Zerodha connected, redirect to prices page
+            return redirect(url_for('prices'))
+        else:
+            # User logged in but Zerodha not connected, show Zerodha login
+            return redirect(url_for('auth.zerodha_login'))
     else:
-        # User is not logged in, show login page
-        return render_template('index.html')
+        # User not logged in, redirect to auth login
+        return redirect(url_for('auth.login'))
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    """Login page for Zerodha API credentials"""
-    global user_api_key, user_api_secret, kite
-    
-    if request.method == 'POST':
-        api_key = request.form.get('api_key')
-        api_secret = request.form.get('api_secret')
-        
-        if not api_key or not api_secret:
-            flash('Please enter both API Key and API Secret', 'error')
-            return render_template('login.html')
-        
-        try:
-            # Store user credentials
-            user_api_key = api_key
-            user_api_secret = api_secret
-            
-            # Initialize KiteConnect with user's API key
-            kite = KiteConnect(api_key=api_key)
-            
-            # Generate login URL
-            login_url = kite.login_url()
-            
-            # Extract redirect token from login URL if present
-            redirect_token = None
-            try:
-                from urllib.parse import urlparse, parse_qs
-                parsed_url = urlparse(login_url)
-                query_params = parse_qs(parsed_url.query)
-                # The redirect token might be in various parameters
-                redirect_token = query_params.get('redirect_token') or query_params.get('request_token') or query_params.get('token')
-                if redirect_token:
-                    redirect_token = redirect_token[0] if isinstance(redirect_token, list) else redirect_token
-            except:
-                pass
-            
-            # Store in session for callback
-            session['api_key'] = api_key
-            session['api_secret'] = api_secret
-            
-            flash('Credentials saved! Please complete the login process.', 'success')
-            return render_template('login.html', login_url=login_url, api_key=api_key, redirect_token=redirect_token)
-            
-        except Exception as e:
-            flash(f'Error initializing KiteConnect: {str(e)}', 'error')
-            return render_template('login.html')
-    
-    return render_template('login.html')
-
-@app.route('/callback')
-def login_callback():
-    """Handle Zerodha login callback"""
-    global kite
-    
-    request_token = request.args.get("request_token")
-    if not request_token:
-        flash('Error: No request token received', 'error')
-        return redirect(url_for('login'))
-    
-    try:
-        # Get stored credentials from session
-        api_key = session.get('api_key')
-        api_secret = session.get('api_secret')
-        
-        if not api_key or not api_secret:
-            flash('Session expired. Please login again.', 'error')
-            return redirect(url_for('login'))
-        
-        # Initialize KiteConnect with stored credentials
-        kite = KiteConnect(api_key=api_key)
-        
-        # Generate session to get access_token
-        data = kite.generate_session(request_token, api_secret=api_secret)
-        access_token = data["access_token"]
-        
-        # Save access token and request token in session
-        session["access_token"] = access_token
-        session["request_token"] = request_token  # Store request token for display
-        kite.set_access_token(access_token)
-        
-        # Save to file for persistence
-        save_session_data()
-        
-        flash('Login successful! You can now access stock data.', 'success')
-        return redirect(url_for('index'))
-        
-    except Exception as e:
-        flash(f'Login failed: {str(e)}', 'error')
-        return redirect(url_for('login'))
+# Zerodha routes moved to app/auth/routes.py
 
 @app.route('/prices')
+@login_required
 def prices():
     """Nifty and Bank Nifty prices page"""
     global kite
+    
+    # Get current user ID
+    user_id = get_current_user_id()
     
     # Get credentials from session or file
     api_key, access_token = get_credentials_from_session_or_file()
     
     # Check if user is logged in (either via session or file)
     if not api_key or not access_token:
-        flash('Please login to view live stock prices', 'error')
-        return redirect(url_for('login'))
+        flash('Please connect your Zerodha account to view live stock prices', 'error')
+        return redirect(url_for('auth.zerodha_login'))
     
     # Ensure kite is initialized
     if not kite:
@@ -667,30 +626,7 @@ def get_alert_prices():
         else:
             return jsonify({'error': f'Error fetching alert prices: {error_msg}', 'success': False}), 500
 
-@app.route('/debug/auth', methods=['GET'])
-def debug_auth():
-    """Debug endpoint to check authentication status"""
-    global kite
-    
-    debug_info = {
-        'session_access_token': bool(session.get('access_token')),
-        'session_api_key': bool(session.get('api_key')),
-        'global_kite_initialized': kite is not None,
-        'global_api_key': user_api_key is not None,
-        'session_file_exists': os.path.exists(services.SESSION_FILE)
-    }
-    
-    if kite:
-        try:
-            # Test if kite object is working
-            profile = kite.profile()
-            debug_info['kite_profile'] = profile.get('user_name', 'Unknown')
-            debug_info['kite_status'] = 'working'
-        except Exception as e:
-            debug_info['kite_error'] = str(e)
-            debug_info['kite_status'] = 'error'
-    
-    return jsonify(debug_info)
+# Debug auth route moved to app/auth/routes.py (auth.debug)
 
 @app.route('/levels/save', methods=['POST'])
 def save_level_endpoint():
@@ -792,41 +728,7 @@ def delete_level_endpoint(uuid):
     except Exception as e:
         return jsonify({'error': f'Error deleting level: {str(e)}', 'success': False}), 500
 
-@app.route('/session/status')
-def session_status():
-    """Debug endpoint to check session status"""
-    return jsonify({
-        'session_data': {
-            'api_key': session.get('api_key'),
-            'access_token': '***' if session.get('access_token') else None,
-            'session_keys': list(session.keys())
-        },
-        'global_data': {
-            'user_api_key': user_api_key,
-            'kite_initialized': kite is not None
-        },
-        'file_exists': os.path.exists(services.SESSION_FILE)
-    })
-
-@app.route('/logout')
-def logout():
-    """Logout and clear session data"""
-    global user_api_key, user_api_secret, kite
-    
-    # Clear global variables
-    user_api_key = None
-    user_api_secret = None
-    kite = None
-    
-    # Clear session
-    session.clear()
-    
-    # Remove session file
-    if os.path.exists(services.SESSION_FILE):
-        os.remove(services.SESSION_FILE)
-    
-    flash('Logged out successfully', 'success')
-    return redirect(url_for('index'))
+# Session and Zerodha routes moved to app/auth/routes.py
 
 # ============================================================================
 # Trading/Trend Detection API Endpoints
@@ -1085,6 +987,15 @@ if __name__ == '__main__':
     print(f"🔧 Debug mode: {'ON' if is_debugging else 'OFF'}")
     print(f"🔄 Auto-reloader: {'OFF' if not use_reloader else 'ON'}")
     
+    # Verify auth blueprint is registered
+    try:
+        if 'auth' in [bp.name for bp in app.blueprints.values()]:
+            print("✓ Authentication module loaded")
+        else:
+            print("⚠ Authentication module not loaded - using fallback")
+    except Exception as e:
+        print(f"⚠ Could not verify auth blueprint: {e}")
+    
     # Start continuous WebSocket connection in background
     # Only start once to avoid Twisted reactor conflicts
     def start_websocket_on_startup():
@@ -1114,11 +1025,19 @@ if __name__ == '__main__':
         print("💰 Live trading mode: ENABLED")
     
     # Run with SocketIO (supports WebSocket)
-    socketio.run(
-        app,
-        debug=True,
-        host='0.0.0.0',
-        port=port,
-        use_reloader=use_reloader,
-        allow_unsafe_werkzeug=True
-    )
+    try:
+        socketio.run(
+            app,
+            debug=True,
+            host='0.0.0.0',
+            port=port,
+            use_reloader=use_reloader,
+            allow_unsafe_werkzeug=True
+        )
+    except KeyboardInterrupt:
+        print("\n✓ Server stopped by user")
+    except Exception as e:
+        print(f"\n✗ Error starting server: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

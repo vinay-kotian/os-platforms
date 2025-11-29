@@ -33,7 +33,7 @@
     <div class="card bg-base-100 shadow-xl mb-8">
         <div class="card-body">
             <h2 class="card-title text-2xl mb-6">API Credentials</h2>
-            <form method="POST" action="{{ url_for('login') }}" class="space-y-6">
+            <form method="POST" action="{{ url_for('auth.zerodha_login') }}" class="space-y-6">
                 <div class="form-control">
                     <label class="label" for="api_key">
                         <span class="label-text font-semibold">API Key</span>

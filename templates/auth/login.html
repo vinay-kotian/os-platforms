@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Login - OS Platforms{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center bg-base-200 py-12 px-4 sm:px-6 lg:px-8">
+    <div class="max-w-md w-full space-y-8">
+        <div>
+            <h2 class="mt-6 text-center text-3xl font-extrabold text-base-content">
+                Sign in to your account
+            </h2>
+            <p class="mt-2 text-center text-sm text-base-content/60">
+                Or
+                <a href="{{ url_for('auth.register') }}" class="font-medium text-primary hover:text-primary-focus">
+                    create a new account
+                </a>
+            </p>
+        </div>
+        
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert {% if category == 'error' %}alert-error{% else %}alert-success{% endif %}">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            {% if category == 'error' %}
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            {% else %}
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                            {% endif %}
+                        </svg>
+                        <span>{{ message }}</span>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <form class="mt-8 space-y-6" method="POST" action="{{ url_for('auth.login') }}">
+            <div class="rounded-md shadow-sm space-y-4">
+                <div>
+                    <label for="username" class="label">
+                        <span class="label-text">Username</span>
+                    </label>
+                    <input id="username" name="username" type="text" required 
+                           class="input input-bordered w-full" 
+                           placeholder="Enter your username"
+                           value="{{ username or '' }}"
+                           autocomplete="username">
+                </div>
+                <div>
+                    <label for="password" class="label">
+                        <span class="label-text">Password</span>
+                    </label>
+                    <input id="password" name="password" type="password" required 
+                           class="input input-bordered w-full" 
+                           placeholder="Enter your password"
+                           autocomplete="current-password">
+                </div>
+            </div>
+
+            <div class="flex items-center justify-between">
+                <label class="label cursor-pointer">
+                    <input type="checkbox" name="remember_me" class="checkbox checkbox-sm">
+                    <span class="label-text ml-2">Remember me</span>
+                </label>
+            </div>
+
+            <div>
+                <button type="submit" class="btn btn-primary w-full">
+                    <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1"></path>
+                    </svg>
+                    Sign in
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
