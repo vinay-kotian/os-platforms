@@ -56,7 +56,10 @@ def login():
     """User login page"""
     # If already logged in, redirect to dashboard
     if session.get('user_id'):
-        return redirect(url_for('prices'))
+        try:
+            return redirect(url_for('prices.prices_page'))
+        except:
+            return redirect('/prices')
     
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -79,7 +82,10 @@ def login():
             flash(f'Welcome back, {user.username}!', 'success')
             
             # Redirect to intended page or dashboard
-            next_page = request.args.get('next') or url_for('prices')
+            try:
+                next_page = request.args.get('next') or url_for('prices.prices_page')
+            except:
+                next_page = request.args.get('next') or '/prices'
             return redirect(next_page)
         else:
             flash(error or 'Login failed', 'error')
@@ -346,7 +352,7 @@ def zerodha_callback():
         save_session_data()
         
         flash('Zerodha login successful! You can now access stock data.', 'success')
-        return redirect(url_for('prices'))
+        return redirect(url_for('prices.prices_page'))
         
     except Exception as e:
         flash(f'Zerodha login failed: {str(e)}', 'error')
@@ -377,7 +383,7 @@ def zerodha_logout():
         os.remove(SESSION_FILE)
     
     flash('Disconnected from Zerodha successfully', 'success')
-    return redirect(url_for('prices'))
+    return redirect(url_for('prices.prices_page'))
 
 
 # ============================================================================

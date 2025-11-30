@@ -45,8 +45,7 @@
                 </a>
             </div>
         </div>
-        {% endif %}
-        
+        {% else %}
         <form class="mt-8 space-y-6" method="POST" action="{{ url_for('auth.zerodha_login') }}">
             <div class="rounded-md shadow-sm space-y-4">
                 <div>
@@ -81,10 +80,11 @@
         </form>
         
         <div class="text-center">
-            <a href="{{ url_for('prices') }}" class="link link-primary text-sm">
+            <a href="{{ url_for('prices.prices_page') }}" class="link link-primary text-sm">
                 Skip for now
             </a>
         </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

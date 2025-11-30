@@ -25,23 +25,33 @@
 {% if access_token %}
 <div class="card bg-base-100 shadow-xl mb-6">
     <div class="card-body">
-        <h2 class="card-title text-lg mb-2">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
-            </svg>
-            Zerodha Access Token
-        </h2>
-        <div class="bg-base-200 rounded-lg p-4">
-            <code class="text-sm break-all">{{ access_token }}</code>
-        </div>
-        {% if request_token %}
-        <div class="mt-4">
-            <h3 class="text-sm font-semibold mb-2">Request Token:</h3>
-            <div class="bg-base-200 rounded-lg p-4">
-                <code class="text-sm break-all">{{ request_token }}</code>
+        <div class="collapse collapse-arrow">
+            <input type="checkbox" id="tokenCollapse" />
+            <div class="collapse-title text-lg font-medium cursor-pointer">
+                <div class="flex items-center gap-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path>
+                    </svg>
+                    Zerodha Tokens
+                </div>
+            </div>
+            <div class="collapse-content">
+                <div class="mt-4">
+                    <h3 class="text-sm font-semibold mb-2">Access Token:</h3>
+                    <div class="bg-base-200 rounded-lg p-4">
+                        <code class="text-sm break-all">{{ access_token }}</code>
+                    </div>
+                </div>
+                {% if request_token %}
+                <div class="mt-4">
+                    <h3 class="text-sm font-semibold mb-2">Request Token:</h3>
+                    <div class="bg-base-200 rounded-lg p-4">
+                        <code class="text-sm break-all">{{ request_token }}</code>
+                    </div>
+                </div>
+                {% endif %}
             </div>
         </div>
-        {% endif %}
     </div>
 </div>
 {% endif %}
@@ -77,6 +87,57 @@
                 </div>
             </div>
             <div class="text-sm text-base-content/60 italic">Last updated: {{ prices.bank_nifty.last_updated }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Stock Selection Section -->
+<div class="card bg-base-100 shadow-xl mb-8">
+    <div class="card-body">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="card-title text-xl">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+                Custom Stocks
+            </h2>
+        </div>
+        
+        <!-- Add Stock Form -->
+        <div class="flex gap-2 mb-4">
+            <div class="form-control flex-1">
+                <label class="label">
+                    <span class="label-text">Exchange</span>
+                </label>
+                <select id="stockExchange" class="select select-bordered">
+                    <option value="NSE" selected>NSE</option>
+                    <option value="BSE">BSE</option>
+                    <option value="NFO">NFO</option>
+                    <option value="MCX">MCX</option>
+                </select>
+            </div>
+            <div class="form-control flex-2">
+                <label class="label">
+                    <span class="label-text">Stock Symbol</span>
+                </label>
+                <input type="text" id="stockSymbol" class="input input-bordered" placeholder="e.g., RELIANCE, TCS, INFY">
+            </div>
+            <div class="form-control flex-shrink-0">
+                <label class="label">
+                    <span class="label-text">&nbsp;</span>
+                </label>
+                <button id="addStockBtn" class="btn btn-primary">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Add Stock
+                </button>
+            </div>
+        </div>
+        
+        <!-- Custom Stocks Display -->
+        <div id="customStocksContainer" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <!-- Custom stocks will be dynamically added here -->
         </div>
     </div>
 </div>
@@ -183,6 +244,35 @@
     </div>
 </div>
 
+<!-- Stock Levels Section -->
+<div class="card bg-base-100 shadow-xl mb-8">
+    <div class="card-body">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="card-title text-xl">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                </svg>
+                Stock Levels
+            </h2>
+            <div class="flex gap-2">
+                <select id="stockLevelStockSelect" class="select select-bordered select-sm">
+                    <option value="">Select Stock</option>
+                </select>
+                <button class="btn btn-sm btn-success" onclick="addStockLevelFromSection()">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Add Level
+                </button>
+            </div>
+        </div>
+        
+        <div id="stockLevelsContainer" class="space-y-4">
+            <!-- Stock levels will be dynamically added here, grouped by stock -->
+        </div>
+    </div>
+</div>
+
 <!-- Paper Trades Section -->
 <div class="card bg-base-100 shadow-xl mb-8">
     <div class="card-body">
@@ -241,6 +331,615 @@
 {% block scripts %}
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
+// Custom Stocks Management
+let customStocks = []; // Array of {exchange, symbol, key}
+let stockLevels = {}; // Object mapping stock key to array of levels {uuid, value}
+
+// Load stocks from localStorage on page load
+function loadCustomStocks() {
+    const saved = localStorage.getItem('customStocks');
+    if (saved) {
+        try {
+            customStocks = JSON.parse(saved);
+            renderCustomStocks();
+            fetchCustomStocksPrices();
+        } catch (e) {
+            console.error('Error loading custom stocks:', e);
+            customStocks = [];
+        }
+    }
+}
+
+// Save stocks to localStorage
+function saveCustomStocks() {
+    localStorage.setItem('customStocks', JSON.stringify(customStocks));
+}
+
+// Add a stock
+function addStock(exchange, symbol) {
+    const key = `${exchange}:${symbol}`;
+    
+    // Check if already exists
+    if (customStocks.some(s => s.key === key)) {
+        alert('Stock already added!');
+        return;
+    }
+    
+    customStocks.push({ exchange, symbol, key });
+    saveCustomStocks();
+    renderCustomStocks();
+    fetchCustomStocksPrices();
+    updateStockLevelSelector();
+}
+
+// Remove a stock
+function removeStock(key) {
+    customStocks = customStocks.filter(s => s.key !== key);
+    // Also remove levels for this stock
+    delete stockLevels[key];
+    saveCustomStocks();
+    renderCustomStocks();
+    updateStockLevelSelector();
+    renderAllStockLevels();
+}
+
+// Render custom stocks UI
+function renderCustomStocks() {
+    const container = document.getElementById('customStocksContainer');
+    if (!container) return;
+    
+    if (customStocks.length === 0) {
+        container.innerHTML = `
+            <div class="col-span-full text-center text-base-content/60 py-8">
+                <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+                </svg>
+                <p>No custom stocks added. Add stocks using the form above.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = customStocks.map(stock => {
+        const safeKey = stock.key.replace(/:/g, '-');
+        return `
+        <div class="card bg-base-100 shadow-xl hover:shadow-2xl transition-shadow" id="stock-${safeKey}">
+            <div class="card-body">
+                <div class="flex items-center justify-between mb-2">
+                    <h3 class="card-title text-lg">${stock.symbol}</h3>
+                    <button class="btn btn-sm btn-ghost btn-circle" onclick="removeStock('${stock.key}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="text-xs text-base-content/60 mb-2">${stock.exchange}</div>
+                <div class="mb-2">
+                    <div class="text-2xl font-bold text-primary" id="price-${safeKey}">Loading...</div>
+                    <div class="badge badge-sm" id="change-${safeKey}">--</div>
+                </div>
+                <div class="text-xs text-base-content/60 italic mb-4" id="updated-${safeKey}">--</div>
+                
+            </div>
+        </div>
+    `;
+    }).join('');
+    
+    // Load levels for each stock and render stock levels section
+    customStocks.forEach(stock => {
+        loadStockLevels(stock.key);
+    });
+    
+    // Update stock selector and render stock levels section
+    updateStockLevelSelector();
+    renderAllStockLevels();
+}
+
+// Fetch prices for all custom stocks
+function fetchCustomStocksPrices() {
+    if (customStocks.length === 0) return;
+    
+    const stocks = customStocks.map(s => `${s.exchange}:${s.symbol}`);
+    
+    fetch('/prices/api/quotes', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ stocks })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success && data.prices) {
+            // Update each stock card
+            customStocks.forEach(stock => {
+                const key = stock.key;
+                const priceData = data.prices[key];
+                
+                if (priceData) {
+                    updateStockCard(stock.key, priceData);
+                } else {
+                    updateStockCardError(stock.key, 'Price not available');
+                }
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching custom stocks prices:', error);
+        customStocks.forEach(stock => {
+            updateStockCardError(stock.key, 'Error fetching price');
+        });
+    });
+}
+
+
+// Update stock card with error
+function updateStockCardError(key, message) {
+    const safeKey = key.replace(/:/g, '-');
+    const priceEl = document.getElementById(`price-${safeKey}`);
+    const changeEl = document.getElementById(`change-${safeKey}`);
+    
+    if (priceEl) priceEl.textContent = message;
+    if (changeEl) {
+        changeEl.textContent = 'N/A';
+        changeEl.className = 'badge badge-sm badge-warning';
+    }
+}
+
+// Stock Levels Management
+function addStockLevel(stockKey) {
+    if (!stockLevels[stockKey]) {
+        stockLevels[stockKey] = [];
+    }
+    
+    const levelUuid = 'temp_' + Date.now();
+    stockLevels[stockKey].push({
+        uuid: levelUuid, 
+        value: null,
+        stop_loss: null,
+        target_percentage: null
+    });
+    renderAllStockLevels();
+}
+
+function addStockLevelFromSection() {
+    const select = document.getElementById('stockLevelStockSelect');
+    const stockKey = select.value;
+    
+    if (!stockKey) {
+        alert('Please select a stock first');
+        return;
+    }
+    
+    addStockLevel(stockKey);
+}
+
+function updateStockLevelSelector() {
+    const select = document.getElementById('stockLevelStockSelect');
+    if (!select) return;
+    
+    // Clear existing options except the first one
+    select.innerHTML = '<option value="">Select Stock</option>';
+    
+    // Add all custom stocks
+    customStocks.forEach(stock => {
+        const option = document.createElement('option');
+        option.value = stock.key;
+        option.textContent = `${stock.symbol} (${stock.exchange})`;
+        select.appendChild(option);
+    });
+}
+
+function renderAllStockLevels(selectedStockKey = null) {
+    const container = document.getElementById('stockLevelsContainer');
+    if (!container) return;
+    
+    // Preserve current input values before re-rendering
+    const preservedValues = {};
+    customStocks.forEach(stock => {
+        if (stockLevels[stock.key]) {
+            const safeKey = stock.key.replace(/:/g, '-');
+            stockLevels[stock.key].forEach(level => {
+                const inputId = `stockLevelInput_${safeKey}_${level.uuid}`;
+                const stopLossId = `stockStopLoss_${safeKey}_${level.uuid}`;
+                const targetId = `stockTarget_${safeKey}_${level.uuid}`;
+                
+                const inputEl = document.getElementById(inputId);
+                const stopLossEl = document.getElementById(stopLossId);
+                const targetEl = document.getElementById(targetId);
+                
+                if (inputEl && inputEl.value !== '') {
+                    preservedValues[inputId] = inputEl.value;
+                }
+                if (stopLossEl && stopLossEl.value !== '') {
+                    preservedValues[stopLossId] = stopLossEl.value;
+                }
+                if (targetEl && targetEl.value !== '') {
+                    preservedValues[targetId] = targetEl.value;
+                }
+            });
+        }
+    });
+    
+    // If no stock key provided, check the dropdown for current selection
+    if (selectedStockKey === null) {
+        const select = document.getElementById('stockLevelStockSelect');
+        if (select && select.value) {
+            selectedStockKey = select.value;
+        }
+    }
+    
+    // Get all stocks that have levels
+    let stocksWithLevels = customStocks.filter(stock => 
+        stockLevels[stock.key] && stockLevels[stock.key].length > 0
+    );
+    
+    // Filter by selected stock if one is selected
+    if (selectedStockKey) {
+        stocksWithLevels = stocksWithLevels.filter(stock => stock.key === selectedStockKey);
+    }
+    
+    if (stocksWithLevels.length === 0) {
+        if (selectedStockKey) {
+            container.innerHTML = '<div class="text-center text-base-content/60 py-4">No levels found for the selected stock. Add levels using the form above.</div>';
+        } else {
+            container.innerHTML = '<div class="text-center text-base-content/60 py-4">No stock levels added. Add stocks and create levels using the form above.</div>';
+        }
+        return;
+    }
+    
+    // Render levels grouped by stock
+    container.innerHTML = stocksWithLevels.map(stock => {
+        const safeKey = stock.key.replace(/:/g, '-');
+        return `
+            <div class="border border-base-300 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="font-semibold text-lg">${stock.symbol} <span class="text-sm text-base-content/60">(${stock.exchange})</span></h3>
+                    <button class="btn btn-xs btn-ghost" onclick="removeAllStockLevels('${stock.key}')" title="Clear all levels for this stock">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    ${stockLevels[stock.key].map(level => `
+                        <div class="border border-base-300 rounded-lg p-2">
+                            <div class="flex items-center gap-2">
+                                <div class="flex-1">
+                                    <label class="text-xs text-base-content/60 mb-1 block">Entry</label>
+                                    <input type="number" id="stockLevelInput_${safeKey}_${level.uuid}" 
+                                           placeholder="Entry price" 
+                                           class="input input-bordered input-xs w-full" 
+                                           step="0.01" 
+                                           value="${level.value || ''}">
+                                </div>
+                                <div class="flex-1">
+                                    <label class="text-xs text-base-content/60 mb-1 block">SL %</label>
+                                    <input type="number" id="stockStopLoss_${safeKey}_${level.uuid}" 
+                                           placeholder="Stop Loss %" 
+                                           class="input input-bordered input-xs w-full" 
+                                           step="0.1" 
+                                           value="${level.stop_loss || ''}">
+                                </div>
+                                <div class="flex-1">
+                                    <label class="text-xs text-base-content/60 mb-1 block">Tgt %</label>
+                                    <input type="number" id="stockTarget_${safeKey}_${level.uuid}" 
+                                           placeholder="Target %" 
+                                           class="input input-bordered input-xs w-full" 
+                                           step="0.1" 
+                                           value="${level.target_percentage || ''}">
+                                </div>
+                                <div class="flex gap-1 pt-5">
+                                    <button class="btn btn-primary btn-xs px-2" onclick="setStockLevel('${stock.key}', '${level.uuid}')" title="Save">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                                        </svg>
+                                    </button>
+                                    <button class="btn btn-error btn-xs px-2" onclick="removeStockLevel('${stock.key}', '${level.uuid}')" title="Delete">
+                                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2 text-xs mt-2" id="stockLevelInfo_${safeKey}_${level.uuid}">
+                                <div class="flex-1 text-gray-600" id="stockLevelStatus_${safeKey}_${level.uuid}">
+                                    ${level.value ? `Entry: ₹${level.value.toFixed(2)}` : 'Not set'}
+                                </div>
+                                <div class="text-gray-500" id="stockLevelDistance_${safeKey}_${level.uuid}"></div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }).join('');
+    
+    // Restore preserved input values after re-rendering
+    Object.keys(preservedValues).forEach(inputId => {
+        const inputEl = document.getElementById(inputId);
+        if (inputEl) {
+            inputEl.value = preservedValues[inputId];
+        }
+    });
+    
+    // Update displays for all levels
+    stocksWithLevels.forEach(stock => {
+        stockLevels[stock.key].forEach(level => {
+            updateStockLevelDisplay(stock.key, level.uuid);
+        });
+    });
+}
+
+function removeAllStockLevels(stockKey) {
+    if (!confirm(`Are you sure you want to clear all levels for this stock?`)) {
+        return;
+    }
+    
+    if (!stockLevels[stockKey] || stockLevels[stockKey].length === 0) {
+        return;
+    }
+    
+    // Delete all levels from database
+    const deletePromises = stockLevels[stockKey]
+        .filter(level => !level.uuid.startsWith('temp_'))
+        .map(level => 
+            fetch(`/levels/delete/${level.uuid}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json',
+                }
+            })
+        );
+    
+    Promise.all(deletePromises)
+        .then(() => {
+            stockLevels[stockKey] = [];
+            renderAllStockLevels();
+        })
+        .catch(error => {
+            console.error('Error clearing stock levels:', error);
+            alert('Error clearing levels');
+        });
+}
+
+function removeStockLevel(stockKey, uuid) {
+    if (!stockLevels[stockKey]) return;
+    
+    const levelIndex = stockLevels[stockKey].findIndex(l => l.uuid === uuid);
+    if (levelIndex === -1) return;
+    
+    const level = stockLevels[stockKey][levelIndex];
+    
+    if (!level.value || uuid.startsWith('temp_')) {
+        // Just remove from array if not saved yet
+        stockLevels[stockKey].splice(levelIndex, 1);
+        renderAllStockLevels();
+        return;
+    }
+    
+    if (confirm(`Are you sure you want to delete this level (₹${level.value.toFixed(2)})?`)) {
+        // Call delete API
+        fetch(`/levels/delete/${uuid}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                stockLevels[stockKey].splice(levelIndex, 1);
+                renderAllStockLevels();
+                console.log('Stock level deleted successfully');
+            } else {
+                alert('Error deleting level: ' + (data.error || 'Unknown error'));
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error deleting level: ' + error.message);
+        });
+    }
+}
+
+function setStockLevel(stockKey, uuid) {
+    if (!stockLevels[stockKey]) return;
+    
+    const levelIndex = stockLevels[stockKey].findIndex(l => l.uuid === uuid);
+    if (levelIndex === -1) return;
+    
+    const safeKey = stockKey.replace(/:/g, '-');
+    const input = document.getElementById(`stockLevelInput_${safeKey}_${uuid}`);
+    const stopLossInput = document.getElementById(`stockStopLoss_${safeKey}_${uuid}`);
+    const targetInput = document.getElementById(`stockTarget_${safeKey}_${uuid}`);
+    
+    const value = parseFloat(input.value);
+    const stopLossPercentage = stopLossInput.value ? parseFloat(stopLossInput.value) : null;
+    const targetPercentage = targetInput.value ? parseFloat(targetInput.value) : null;
+    
+    if (isNaN(value) || value <= 0) {
+        alert('Please enter a valid positive entry price');
+        return;
+    }
+    
+    if (stopLossPercentage !== null && (isNaN(stopLossPercentage) || stopLossPercentage <= 0)) {
+        alert('Please enter a valid positive stop loss percentage');
+        return;
+    }
+    
+    if (targetPercentage !== null && (isNaN(targetPercentage) || targetPercentage <= 0)) {
+        alert('Please enter a valid positive target percentage');
+        return;
+    }
+    
+    const existingUuid = stockLevels[stockKey][levelIndex].uuid.startsWith('temp_') ? null : stockLevels[stockKey][levelIndex].uuid;
+    stockLevels[stockKey][levelIndex].value = value;
+    stockLevels[stockKey][levelIndex].stop_loss = stopLossPercentage;
+    stockLevels[stockKey][levelIndex].target_percentage = targetPercentage;
+    
+    // Get stock info
+    const stock = customStocks.find(s => s.key === stockKey);
+    if (!stock) return;
+    
+    // Save to database
+    saveStockLevelToDatabase(stockKey, stock.exchange, stock.symbol, value, existingUuid, stopLossPercentage, targetPercentage)
+        .then((data) => {
+            if (data && data.uuid) {
+                stockLevels[stockKey][levelIndex].uuid = data.uuid;
+            }
+            console.log(`Stock level set: Entry=${value}, SL=${stopLossPercentage}%, Tgt=${targetPercentage}%`);
+            renderAllStockLevels();
+            updateStockLevelDisplays(stockKey);
+        })
+        .catch(error => {
+            alert('Error saving level: ' + error.message);
+        });
+}
+
+function saveStockLevelToDatabase(stockKey, exchange, symbol, levelValue, levelUuid = null, stopLossPercentage = null, targetPercentage = null) {
+    return fetch('/levels/save', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            index_type: stockKey,  // Use full key as index_type
+            level_value: levelValue,
+            uuid: levelUuid,
+            stock_symbol: stockKey,
+            stock_exchange: exchange,
+            stop_loss: stopLossPercentage,
+            target_percentage: targetPercentage
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Stock level saved to database:', data.uuid);
+            return data;
+        } else {
+            console.error('Error saving stock level:', data.error);
+            throw new Error(data.error || 'Failed to save level');
+        }
+    })
+    .catch(error => {
+        console.error('Error saving stock level:', error);
+        throw error;
+    });
+}
+
+function loadStockLevels(stockKey) {
+    fetch(`/levels/get?stock_symbol=${encodeURIComponent(stockKey)}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && Array.isArray(data.levels)) {
+                stockLevels[stockKey] = data.levels.map(level => ({
+                    uuid: level.uuid,
+                    value: level.level_value || level.value,  // Support both formats
+                    stop_loss: level.stop_loss || null,
+                    target_percentage: level.target_percentage || null
+                }));
+                console.log(`Loaded ${data.levels.length} levels for ${stockKey}:`, stockLevels[stockKey]);
+                renderAllStockLevels();
+                updateStockLevelDisplays(stockKey);
+            } else {
+                console.log(`No levels found for ${stockKey}`, data);
+                stockLevels[stockKey] = [];
+                renderAllStockLevels();
+            }
+        })
+        .catch(error => {
+            console.error('Error loading stock levels:', error);
+            stockLevels[stockKey] = [];
+            renderAllStockLevels();
+        });
+}
+
+
+function updateStockLevelDisplay(stockKey, uuid) {
+    const safeKey = stockKey.replace(/:/g, '-');
+    const level = stockLevels[stockKey]?.find(l => l.uuid === uuid);
+    if (!level) return;
+    
+    const statusElement = document.getElementById(`stockLevelStatus_${safeKey}_${uuid}`);
+    const distanceElement = document.getElementById(`stockLevelDistance_${safeKey}_${uuid}`);
+    
+    if (!statusElement || !distanceElement) return;
+    
+    // Get current price
+    const priceEl = document.getElementById(`price-${safeKey}`);
+    const currentPrice = priceEl ? parseFloat(priceEl.textContent.replace(/[₹,]/g, '')) : 0;
+    
+    if (level.value !== null) {
+        let statusText = `Entry: ₹${level.value.toFixed(2)}`;
+        if (level.stop_loss) {
+            const stopLossPrice = level.value * (1 - level.stop_loss / 100);
+            statusText += ` | SL: ₹${stopLossPrice.toFixed(2)} (${level.stop_loss}%)`;
+        }
+        if (level.target_percentage) {
+            const targetPrice = level.value * (1 + level.target_percentage / 100);
+            statusText += ` | Tgt: ₹${targetPrice.toFixed(2)} (${level.target_percentage}%)`;
+        }
+        statusElement.textContent = statusText;
+        statusElement.className = 'text-xs text-gray-600';
+        
+        if (currentPrice > 0 && !isNaN(currentPrice)) {
+            const distance = Math.abs(currentPrice - level.value);
+            const distancePercent = (distance / level.value) * 100;
+            distanceElement.textContent = `Distance: ₹${distance.toFixed(2)} (${distancePercent.toFixed(1)}%)`;
+            
+            // Color code based on distance
+            if (distancePercent <= 1) {
+                distanceElement.className = 'text-xs text-error font-semibold';
+            } else if (distancePercent <= 5) {
+                distanceElement.className = 'text-xs text-warning font-semibold';
+            } else {
+                distanceElement.className = 'text-xs text-gray-500';
+            }
+        } else {
+            distanceElement.textContent = '';
+        }
+    } else {
+        statusElement.textContent = 'Not set';
+        statusElement.className = 'text-xs text-gray-600';
+        distanceElement.textContent = '';
+    }
+}
+
+function updateStockLevelDisplays(stockKey) {
+    if (!stockLevels[stockKey]) return;
+    stockLevels[stockKey].forEach(level => {
+        updateStockLevelDisplay(stockKey, level.uuid);
+    });
+}
+
+// Update stock level displays when price updates
+function updateStockCard(key, priceData) {
+    const safeKey = key.replace(/:/g, '-');
+    const priceEl = document.getElementById(`price-${safeKey}`);
+    const changeEl = document.getElementById(`change-${safeKey}`);
+    const updatedEl = document.getElementById(`updated-${safeKey}`);
+    
+    if (priceEl) {
+        priceEl.textContent = `₹${parseFloat(priceData.current_price || 0).toFixed(2)}`;
+    }
+    
+    if (changeEl) {
+        const change = parseFloat(priceData.change || 0);
+        const changePercent = parseFloat(priceData.change_percent || 0);
+        changeEl.textContent = `${change >= 0 ? '+' : ''}${change.toFixed(2)} (${changePercent >= 0 ? '+' : ''}${changePercent.toFixed(2)}%)`;
+        changeEl.className = `badge badge-sm ${change >= 0 ? 'badge-success' : 'badge-error'}`;
+    }
+    
+    if (updatedEl && priceData.last_updated) {
+        updatedEl.textContent = `Last updated: ${priceData.last_updated}`;
+    }
+    
+    // Update level displays for this stock
+    updateStockLevelDisplays(key);
+}
+
 // Initialize SocketIO connection for continuous price streaming
 const socket = io();
 
@@ -515,6 +1214,62 @@ document.addEventListener('DOMContentLoaded', function() {
             refreshThreeLevels();
         }
     }, 3000);
+    
+    // Initialize custom stocks
+    loadCustomStocks();
+    
+    // Set up auto-refresh for custom stocks every 5 seconds
+    setInterval(() => {
+        fetchCustomStocksPrices();
+        // Also update level displays (without re-rendering, which would reset unsaved inputs)
+        customStocks.forEach(stock => {
+            if (stockLevels[stock.key]) {
+                stockLevels[stock.key].forEach(level => {
+                    updateStockLevelDisplay(stock.key, level.uuid);
+                });
+            }
+        });
+        // Don't call renderAllStockLevels() here - it resets unsaved input values
+        // Only update the display elements, not the entire HTML
+    }, 5000);
+    
+    // Add stock button handler
+    const addStockBtn = document.getElementById('addStockBtn');
+    const stockSymbolInput = document.getElementById('stockSymbol');
+    
+    if (addStockBtn) {
+        addStockBtn.addEventListener('click', function() {
+            const exchange = document.getElementById('stockExchange').value;
+            const symbol = stockSymbolInput.value.trim().toUpperCase();
+            
+            if (!symbol) {
+                alert('Please enter a stock symbol');
+                return;
+            }
+            
+            addStock(exchange, symbol);
+            stockSymbolInput.value = ''; // Clear input
+        });
+    }
+    
+    // Allow Enter key to add stock
+    if (stockSymbolInput) {
+        stockSymbolInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                addStockBtn.click();
+            }
+        });
+    }
+    
+    // Add event listener for stock level dropdown to filter display
+    const stockLevelStockSelect = document.getElementById('stockLevelStockSelect');
+    if (stockLevelStockSelect) {
+        stockLevelStockSelect.addEventListener('change', function() {
+            const selectedStockKey = this.value;
+            // If empty string, show all stocks; otherwise filter by selected stock
+            renderAllStockLevels(selectedStockKey ? selectedStockKey : null);
+        });
+    }
 });
 
 // Dynamic Levels functionality

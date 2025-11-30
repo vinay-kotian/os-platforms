@@ -90,6 +90,30 @@ if get_current_user_id is None:
     def get_current_user_id():
         return 'default_user'
 
+# Register prices blueprint
+try:
+    from app.prices.routes import prices_bp
+    app.register_blueprint(prices_bp)
+    print("✓ Prices blueprint registered successfully")
+except ImportError as e:
+    print(f"Warning: Prices module not found. Error: {e}")
+except Exception as e:
+    print(f"Error registering prices blueprint: {e}")
+    import traceback
+    traceback.print_exc()
+
+# Register levels blueprint
+try:
+    from app.levels.routes import levels_bp
+    app.register_blueprint(levels_bp)
+    print("✓ Levels blueprint registered successfully")
+except ImportError as e:
+    print(f"Warning: Levels module not found. Error: {e}")
+except Exception as e:
+    print(f"Error registering levels blueprint: {e}")
+    import traceback
+    traceback.print_exc()
+
 @app.route('/')
 def index():
     """Home page - redirect based on login status"""
@@ -98,136 +122,44 @@ def index():
         # Check if Zerodha is connected
         if session.get('access_token') and kite:
             # User is logged in and Zerodha connected, redirect to prices page
-            return redirect(url_for('prices'))
+            try:
+                return redirect(url_for('prices.prices_page'))
+            except:
+                # Fallback if prices module not available
+                return redirect('/prices')
         else:
             # User logged in but Zerodha not connected, show Zerodha login
             return redirect(url_for('auth.zerodha_login'))
+    
     else:
         # User not logged in, redirect to auth login
         return redirect(url_for('auth.login'))
 
 # Zerodha routes moved to app/auth/routes.py
+# Legacy callback route for backward compatibility (Zerodha redirects to /callback)
+@app.route('/callback')
+def callback():
+    """Legacy callback route - redirects to auth callback handler"""
+    # Forward all query parameters to the auth callback
+    return redirect(url_for('auth.zerodha_callback', **request.args.to_dict()))
 
-@app.route('/prices')
-@login_required
-def prices():
-    """Nifty and Bank Nifty prices page"""
-    global kite
-    
-    # Get current user ID
-    user_id = get_current_user_id()
-    
-    # Get credentials from session or file
-    api_key, access_token = get_credentials_from_session_or_file()
-    
-    # Check if user is logged in (either via session or file)
-    if not api_key or not access_token:
-        flash('Please connect your Zerodha account to view live stock prices', 'error')
-        return redirect(url_for('auth.zerodha_login'))
-    
-    # Ensure kite is initialized
-    if not kite:
-        try:
-            kite = KiteConnect(api_key=api_key)
-            kite.set_access_token(access_token)
-        except Exception as e:
-            flash(f'Error initializing KiteConnect: {str(e)}', 'error')
-            return render_template('prices.html', prices=None)
-    
-    try:
-        # Fetch live prices using WebSocket
-        websocket_prices_data = fetch_nifty_prices_websocket(timeout=10)
-        
-        # Check if we got valid prices
-        nifty_price = websocket_prices_data.get('NIFTY 50', {}).get('last_price', 0)
-        bank_nifty_price = websocket_prices_data.get('NIFTY BANK', {}).get('last_price', 0)
-        
-        # If WebSocket failed, fallback to REST API
-        if nifty_price == 0 or bank_nifty_price == 0:
-            # Fallback to REST API
-            nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
-            bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
-            
-            prices_data = {
-                'nifty': {
-                    'name': nifty_data.get('tradingsymbol', 'NIFTY 50'),
-                    'current_price': nifty_data.get('last_price', 0),
-                    'change': nifty_data.get('net_change', 0),
-                    'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
-                    'last_updated': nifty_data.get('timestamp', 'N/A')
-                },
-                'bank_nifty': {
-                    'name': bank_nifty_data.get('tradingsymbol', 'NIFTY BANK'),
-                    'current_price': bank_nifty_data.get('last_price', 0),
-                    'change': bank_nifty_data.get('net_change', 0),
-                    'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
-                    'last_updated': bank_nifty_data.get('timestamp', 'N/A')
-                }
-            }
-        else:
-            # Use WebSocket data - need to get additional info from REST API for change/change_percent
-            try:
-                nifty_data = kite.quote("NSE:NIFTY 50").get('NSE:NIFTY 50', {})
-                bank_nifty_data = kite.quote("NSE:NIFTY BANK").get('NSE:NIFTY BANK', {})
-                
-                prices_data = {
-                    'nifty': {
-                        'name': 'NIFTY 50',
-                        'current_price': nifty_price,
-                        'change': nifty_data.get('net_change', 0),
-                        'change_percent': nifty_data.get('net_change', 0) / nifty_data.get('ohlc', {}).get('close', 1) * 100 if nifty_data.get('ohlc', {}).get('close') else 0,
-                        'last_updated': websocket_prices_data.get('NIFTY 50', {}).get('timestamp', 'N/A')
-                    },
-                    'bank_nifty': {
-                        'name': 'NIFTY BANK',
-                        'current_price': bank_nifty_price,
-                        'change': bank_nifty_data.get('net_change', 0),
-                        'change_percent': bank_nifty_data.get('net_change', 0) / bank_nifty_data.get('ohlc', {}).get('close', 1) * 100 if bank_nifty_data.get('ohlc', {}).get('close') else 0,
-                        'last_updated': websocket_prices_data.get('NIFTY BANK', {}).get('timestamp', 'N/A')
-                    }
-                }
-            except:
-                # If REST API fails, use WebSocket data only
-                prices_data = {
-                    'nifty': {
-                        'name': 'NIFTY 50',
-                        'current_price': nifty_price,
-                        'change': 0,
-                        'change_percent': 0,
-                        'last_updated': websocket_prices_data.get('NIFTY 50', {}).get('timestamp', 'N/A')
-                    },
-                    'bank_nifty': {
-                        'name': 'NIFTY BANK',
-                        'current_price': bank_nifty_price,
-                        'change': 0,
-                        'change_percent': 0,
-                        'last_updated': websocket_prices_data.get('NIFTY BANK', {}).get('timestamp', 'N/A')
-                    }
-                }
-        
-        # Get Zerodha tokens from session if available
-        access_token_display = session.get('access_token') or access_token
-        request_token = session.get('request_token')
-        
-        return render_template('prices.html', prices=prices_data, access_token=access_token_display, request_token=request_token)
-        
-    except Exception as e:
-        flash(f'Error fetching stock prices: {str(e)}', 'error')
-        return render_template('prices.html', prices=None)
-
+# Price routes moved to app/prices/routes.py
+# Legacy endpoints for backward compatibility
 @app.route('/stocks/fetch-price')
+@login_required
 def fetch_prices():
-    """API endpoint to fetch current stock prices (DEPRECATED - use /stocks/fetch-price-websocket or WebSocket)"""
-    # For backward compatibility, call the WebSocket endpoint function
-    return fetch_prices_websocket()
+    """API endpoint to fetch current stock prices (DEPRECATED - use /prices/api/fetch)"""
+    # Redirect to new endpoint
+    from flask import redirect
+    return redirect(url_for('prices.api_fetch_prices'))
 
 @app.route('/stocks/fetch-price-websocket', methods=['GET'])
+@login_required
 def fetch_prices_websocket():
-    """API endpoint to fetch current stock prices using WebSocket"""
-    global kite
-    
-    # Get credentials from session or file
-    api_key, access_token = get_credentials_from_session_or_file()
+    """API endpoint to fetch current stock prices using WebSocket (DEPRECATED - use /prices/api/fetch)"""
+    # Redirect to new endpoint
+    from flask import redirect
+    return redirect(url_for('prices.api_fetch_prices'))
     
     # Check if user is logged in (either via session or file)
     if not api_key or not access_token:
@@ -629,58 +561,128 @@ def get_alert_prices():
 # Debug auth route moved to app/auth/routes.py (auth.debug)
 
 @app.route('/levels/save', methods=['POST'])
+@login_required
 def save_level_endpoint():
-    """API endpoint to save a level (supports dynamic levels)"""
+    """API endpoint to save a level (supports dynamic levels and custom stocks)"""
     try:
         data = request.get_json()
-        index_type = data.get('index_type')  # 'BANK_NIFTY' or 'NIFTY_50'
+        index_type = data.get('index_type')  # 'BANK_NIFTY', 'NIFTY_50', or stock symbol
         level_value = data.get('level_value')
         level_uuid = data.get('uuid')  # Optional: for updating existing level
+        stock_symbol = data.get('stock_symbol')  # Optional: for custom stocks (e.g., 'NSE:RELIANCE')
+        stock_exchange = data.get('stock_exchange')  # Optional: exchange name
+        stop_loss = data.get('stop_loss')  # Optional: stop loss percentage (e.g., 2.0 for 2%)
+        target_percentage = data.get('target_percentage')  # Optional: target percentage (e.g., 2.5 for 2.5%)
         
         if not all([index_type, level_value]):
             return jsonify({'error': 'Missing required fields (index_type, level_value)', 'success': False}), 400
         
-        if index_type not in ['BANK_NIFTY', 'NIFTY_50']:
-            return jsonify({'error': 'Invalid index_type. Must be BANK_NIFTY or NIFTY_50', 'success': False}), 400
+        # Validate index_type for traditional indices, or allow stock symbols
+        if index_type not in ['BANK_NIFTY', 'NIFTY_50'] and not stock_symbol:
+            # If it's not a traditional index and no stock_symbol provided, treat index_type as stock symbol
+            if ':' in index_type:
+                # Format: 'NSE:RELIANCE'
+                parts = index_type.split(':')
+                if len(parts) == 2:
+                    stock_exchange = parts[0]
+                    stock_symbol = index_type
+                    index_type = index_type  # Use the full symbol as index_type
+            else:
+                return jsonify({'error': 'Invalid index_type. Must be BANK_NIFTY, NIFTY_50, or provide stock_symbol', 'success': False}), 400
         
         if not isinstance(level_value, (int, float)) or level_value <= 0:
             return jsonify({'error': 'level_value must be a positive number', 'success': False}), 400
         
-        # Use a default user_id for now (you can modify this based on your auth system)
-        user_id = 'default_user'
+        # Use current user ID from auth
+        user_id = get_current_user_id()
         
-        result_uuid = save_level(user_id, index_type, level_value, level_uuid)
+        # Convert stop_loss and target_percentage to float if provided
+        stop_loss_float = float(stop_loss) if stop_loss is not None and stop_loss != '' else None
+        target_percentage_float = float(target_percentage) if target_percentage is not None and target_percentage != '' else None
         
-        if result_uuid:
-            return jsonify({
-                'message': 'Level saved successfully', 
-                'success': True, 
-                'uuid': result_uuid
-            }), 200
-        else:
-            return jsonify({'error': 'Failed to save level', 'success': False}), 500
+        # Try to use new levels module, fallback to old service
+        try:
+            from app.levels import LevelService
+            level_service = LevelService()
+            success, level, error = level_service.save_level(
+                user_id, index_type, level_value, level_uuid,
+                stock_symbol, stock_exchange, stop_loss_float, target_percentage_float
+            )
+            if success and level:
+                return jsonify({
+                    'message': 'Level saved successfully',
+                    'success': True,
+                    'uuid': level.uuid
+                }), 200
+            else:
+                return jsonify({'error': error or 'Failed to save level', 'success': False}), 500
+        except ImportError:
+            # Fallback to old service
+            result_uuid = save_level(user_id, index_type, level_value, level_uuid, stock_symbol, stock_exchange, stop_loss_float, target_percentage_float)
+            if result_uuid:
+                return jsonify({
+                    'message': 'Level saved successfully', 
+                    'success': True, 
+                    'uuid': result_uuid
+                }), 200
+            else:
+                return jsonify({'error': 'Failed to save level', 'success': False}), 500
             
     except Exception as e:
         return jsonify({'error': f'Error saving level: {str(e)}', 'success': False}), 500
 
 @app.route('/levels/get', methods=['GET'])
+@login_required
 def get_levels_endpoint():
-    """API endpoint to get all levels"""
+    """API endpoint to get all levels (supports stock-specific levels)"""
     try:
-        # Use a default user_id for now (you can modify this based on your auth system)
-        user_id = 'default_user'
+        # Use current user ID from auth
+        user_id = get_current_user_id()
         index_type = request.args.get('index_type')  # Optional filter
         today_only = request.args.get('today_only', 'false').lower() == 'true'  # Optional filter for today's levels only
+        stock_symbol = request.args.get('stock_symbol')  # Optional: get levels for specific stock
         
-        levels = get_levels(user_id, index_type, today_only)
-        print(f"Returning levels: BANK_NIFTY={len(levels['BANK_NIFTY'])}, NIFTY_50={len(levels['NIFTY_50'])}")
-        return jsonify({'levels': levels, 'success': True}), 200
+        # Try to use new levels module, fallback to old service
+        try:
+            from app.levels import LevelService
+            level_service = LevelService()
+            levels_dict = level_service.get_levels(user_id, index_type, today_only, stock_symbol, grouped=True)
+            
+            # Convert to dict format
+            if stock_symbol:
+                stock_levels = levels_dict.get(stock_symbol, [])
+                return jsonify({
+                    'levels': [level.to_dict() for level in stock_levels],
+                    'success': True
+                }), 200
+            
+            # Convert to old format for backward compatibility
+            result = {}
+            for key, levels in levels_dict.items():
+                result[key] = [level.to_dict() if hasattr(level, 'to_dict') else level for level in levels]
+            
+            # Ensure backward compatibility
+            if 'BANK_NIFTY' not in result:
+                result['BANK_NIFTY'] = []
+            if 'NIFTY_50' not in result:
+                result['NIFTY_50'] = []
+            
+            print(f"Returning levels: BANK_NIFTY={len(result.get('BANK_NIFTY', []))}, NIFTY_50={len(result.get('NIFTY_50', []))}")
+            return jsonify({'levels': result, 'success': True}), 200
+        except ImportError:
+            # Fallback to old service
+            levels = get_levels(user_id, index_type, today_only, stock_symbol)
+            if stock_symbol:
+                return jsonify({'levels': levels, 'success': True}), 200
+            print(f"Returning levels: BANK_NIFTY={len(levels.get('BANK_NIFTY', []))}, NIFTY_50={len(levels.get('NIFTY_50', []))}")
+            return jsonify({'levels': levels, 'success': True}), 200
         
     except Exception as e:
         print(f"Error in get_levels_endpoint: {e}")
         return jsonify({'error': f'Error getting levels: {str(e)}', 'success': False}), 500
 
 @app.route('/levels/clear', methods=['POST'])
+@login_required
 def clear_levels_endpoint():
     """API endpoint to clear levels (for daily refresh)"""
     try:
@@ -688,12 +690,21 @@ def clear_levels_endpoint():
         index_type = data.get('index_type')  # Optional: clear specific index type
         clear_today_only = data.get('today_only', False)  # If True, only clear today's levels
         
-        user_id = 'default_user'
+        user_id = get_current_user_id()
         
-        if clear_today_only:
-            deleted_count = clear_levels_for_today(user_id)
-        else:
-            deleted_count = clear_all_levels(user_id, index_type)
+        # Try to use new levels module, fallback to old service
+        try:
+            from app.levels import LevelService
+            level_service = LevelService()
+            deleted_count, error = level_service.clear_levels(user_id, index_type, clear_today_only)
+            if error:
+                return jsonify({'error': error, 'success': False}), 500
+        except ImportError:
+            # Fallback to old service
+            if clear_today_only:
+                deleted_count = clear_levels_for_today(user_id)
+            else:
+                deleted_count = clear_all_levels(user_id, index_type)
         
         return jsonify({
             'message': f'Cleared {deleted_count} level(s)', 
@@ -705,25 +716,35 @@ def clear_levels_endpoint():
         return jsonify({'error': f'Error clearing levels: {str(e)}', 'success': False}), 500
 
 @app.route('/levels/delete/<uuid>', methods=['DELETE'])
+@login_required
 def delete_level_endpoint(uuid):
     """API endpoint to delete a level by UUID"""
     try:
-        import sqlite3
-        conn = sqlite3.connect(services.DATABASE_FILE)
-        cursor = conn.cursor()
+        user_id = get_current_user_id()
         
-        # Check if level exists
-        cursor.execute('SELECT uuid FROM level WHERE uuid = ?', (uuid,))
-        if not cursor.fetchone():
+        # Try to use new levels module, fallback to old service
+        try:
+            from app.levels import LevelService
+            level_service = LevelService()
+            success, error = level_service.delete_level(uuid, user_id)
+            if success:
+                return jsonify({'message': 'Level deleted successfully', 'success': True}), 200
+            else:
+                return jsonify({'error': error or 'Level not found', 'success': False}), 404
+        except ImportError:
+            # Fallback to old service
+            import sqlite3
+            conn = sqlite3.connect(services.DATABASE_FILE)
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM level WHERE uuid = ? AND user_id = ?', (uuid, user_id))
+            deleted = cursor.rowcount > 0
+            conn.commit()
             conn.close()
-            return jsonify({'error': 'Level not found', 'success': False}), 404
-        
-        # Delete the level
-        cursor.execute('DELETE FROM level WHERE uuid = ?', (uuid,))
-        conn.commit()
-        conn.close()
-        
-        return jsonify({'message': 'Level deleted successfully', 'success': True}), 200
+            
+            if deleted:
+                return jsonify({'message': 'Level deleted successfully', 'success': True}), 200
+            else:
+                return jsonify({'error': 'Level not found', 'success': False}), 404
         
     except Exception as e:
         return jsonify({'error': f'Error deleting level: {str(e)}', 'success': False}), 500

@@ -1270,13 +1270,42 @@ def init_database():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 uuid TEXT UNIQUE NOT NULL,
                 user_id TEXT NOT NULL,
-                index_type TEXT NOT NULL,  -- 'BANK_NIFTY' or 'NIFTY_50'
+                index_type TEXT NOT NULL,  -- 'BANK_NIFTY', 'NIFTY_50', or stock symbol like 'NSE:RELIANCE'
                 level_value REAL NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                created_date TEXT NOT NULL  -- Date when level was created (for daily refresh)
+                created_date TEXT NOT NULL,  -- Date when level was created (for daily refresh)
+                stock_symbol TEXT,  -- For custom stocks: 'EXCHANGE:SYMBOL' format
+                stock_exchange TEXT  -- Exchange name for custom stocks
             )
         ''')
+        
+        # Add stock_symbol and stock_exchange columns if they don't exist (for backward compatibility)
+        try:
+            cursor.execute('ALTER TABLE level ADD COLUMN stock_symbol TEXT')
+        except:
+            pass  # Column already exists
+        try:
+            cursor.execute('ALTER TABLE level ADD COLUMN stock_exchange TEXT')
+        except:
+            pass  # Column already exists
+        try:
+            cursor.execute('ALTER TABLE level ADD COLUMN stop_loss REAL')
+        except:
+            pass  # Column already exists
+        try:
+            cursor.execute('ALTER TABLE level ADD COLUMN target_percentage REAL')
+        except:
+            pass  # Column already exists
+        try:
+            cursor.execute('ALTER TABLE level ADD COLUMN expiry_type TEXT DEFAULT "today"')
+        except:
+            pass  # Column already exists
+        try:
+            cursor.execute('ALTER TABLE level ADD COLUMN expiry_date TEXT')
+        except:
+            pass  # Column already exists
+        # Note: stop_loss is now stored as percentage (e.g., 2.0 for 2%), not absolute price
         
         # Create entry_prices table for trading entry prices
         cursor.execute('''
@@ -1404,8 +1433,19 @@ def init_database():
     except Exception as e:
         print(f"Error initializing database: {e}")
 
-def save_level(user_id, index_type, level_value, level_uuid=None):
-    """Save a level to the database (allows dynamic levels, not just 1-3)"""
+def save_level(user_id, index_type, level_value, level_uuid=None, stock_symbol=None, stock_exchange=None, stop_loss=None, target_percentage=None):
+    """Save a level to the database (allows dynamic levels, not just 1-3)
+    
+    Args:
+        user_id: User ID
+        index_type: Index type ('BANK_NIFTY', 'NIFTY_50', or stock symbol like 'NSE:RELIANCE')
+        level_value: Level value (entry price)
+        level_uuid: Optional UUID for updating existing level
+        stock_symbol: Optional stock symbol for custom stocks
+        stock_exchange: Optional exchange name for custom stocks
+        stop_loss: Optional stop loss percentage (e.g., 2.0 for 2% below entry)
+        target_percentage: Optional target percentage (e.g., 2.5 for 2.5% above entry)
+    """
     try:
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
@@ -1424,9 +1464,9 @@ def save_level(user_id, index_type, level_value, level_uuid=None):
                 # Update existing level
                 cursor.execute('''
                     UPDATE level 
-                    SET level_value = ?, updated_at = ?
+                    SET level_value = ?, updated_at = ?, stock_symbol = ?, stock_exchange = ?, stop_loss = ?, target_percentage = ?
                     WHERE uuid = ? AND user_id = ?
-                ''', (level_value, current_time, level_uuid, user_id))
+                ''', (level_value, current_time, stock_symbol, stock_exchange, stop_loss, target_percentage, level_uuid, user_id))
             else:
                 return False  # UUID not found
         else:
@@ -1434,9 +1474,9 @@ def save_level(user_id, index_type, level_value, level_uuid=None):
             level_uuid = str(uuid.uuid4())
             cursor.execute('''
                 INSERT INTO level 
-                (uuid, user_id, index_type, level_value, created_at, updated_at, created_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (level_uuid, user_id, index_type, level_value, current_time, current_time, current_date))
+                (uuid, user_id, index_type, level_value, created_at, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (level_uuid, user_id, index_type, level_value, current_time, current_time, current_date, stock_symbol, stock_exchange, stop_loss, target_percentage))
         
         conn.commit()
         conn.close()
@@ -1446,13 +1486,14 @@ def save_level(user_id, index_type, level_value, level_uuid=None):
         print(f"Error saving level: {e}")
         return None
 
-def get_levels(user_id, index_type=None, today_only=False):
+def get_levels(user_id, index_type=None, today_only=False, stock_symbol=None):
     """Get all levels for a user (returns as list, not fixed 1-3 structure)
     
     Args:
         user_id: User ID
-        index_type: Optional filter by index type ('BANK_NIFTY' or 'NIFTY_50')
+        index_type: Optional filter by index type ('BANK_NIFTY', 'NIFTY_50', or stock symbol)
         today_only: If True, only return levels created today
+        stock_symbol: Optional filter by stock symbol (e.g., 'NSE:RELIANCE')
     """
     try:
         conn = sqlite3.connect(DATABASE_FILE)
@@ -1460,17 +1501,33 @@ def get_levels(user_id, index_type=None, today_only=False):
         
         today = datetime.now().date().isoformat()
         
-        if index_type:
+        if stock_symbol:
+            # Get levels for a specific stock
             if today_only:
                 cursor.execute('''
-                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    SELECT uuid, index_type, level_value, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage
+                    FROM level 
+                    WHERE user_id = ? AND stock_symbol = ? AND created_date = ?
+                    ORDER BY level_value DESC
+                ''', (user_id, stock_symbol, today))
+            else:
+                cursor.execute('''
+                    SELECT uuid, index_type, level_value, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage
+                    FROM level 
+                    WHERE user_id = ? AND stock_symbol = ?
+                    ORDER BY level_value DESC
+                ''', (user_id, stock_symbol))
+        elif index_type:
+            if today_only:
+                cursor.execute('''
+                    SELECT uuid, index_type, level_value, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage
                     FROM level 
                     WHERE user_id = ? AND index_type = ? AND created_date = ?
                     ORDER BY level_value DESC
                 ''', (user_id, index_type, today))
             else:
                 cursor.execute('''
-                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    SELECT uuid, index_type, level_value, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage
                     FROM level 
                     WHERE user_id = ? AND index_type = ?
                     ORDER BY level_value DESC
@@ -1478,14 +1535,14 @@ def get_levels(user_id, index_type=None, today_only=False):
         else:
             if today_only:
                 cursor.execute('''
-                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    SELECT uuid, index_type, level_value, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage
                     FROM level 
                     WHERE user_id = ? AND created_date = ?
                     ORDER BY index_type, level_value DESC
                 ''', (user_id, today))
             else:
                 cursor.execute('''
-                    SELECT uuid, index_type, level_value, updated_at, created_date
+                    SELECT uuid, index_type, level_value, updated_at, created_date, stock_symbol, stock_exchange, stop_loss, target_percentage
                     FROM level 
                     WHERE user_id = ?
                     ORDER BY index_type, level_value DESC
@@ -1500,14 +1557,47 @@ def get_levels(user_id, index_type=None, today_only=False):
             'NIFTY_50': []
         }
         
+        # Dictionary to store stock-specific levels
+        stock_levels = {}
+        
         for row in results:
-            level_uuid, idx_type, level_value, updated_at, created_date = row
-            levels[idx_type].append({
+            # Handle different row lengths for backward compatibility
+            if len(row) >= 9:
+                level_uuid, idx_type, level_value, updated_at, created_date, stock_sym, stock_ex, stop_loss, target_percentage = row
+            elif len(row) >= 7:
+                level_uuid, idx_type, level_value, updated_at, created_date, stock_sym, stock_ex = row
+                stop_loss, target_percentage = None, None
+            else:
+                # Old format without stock fields
+                level_uuid, idx_type, level_value, updated_at, created_date = row[:5]
+                stock_sym, stock_ex, stop_loss, target_percentage = None, None, None, None
+            
+            level_data = {
                 'uuid': level_uuid,
                 'value': level_value,
                 'updated_at': updated_at,
-                'created_date': created_date
-            })
+                'created_date': created_date,
+                'stop_loss': stop_loss,
+                'target_percentage': target_percentage
+            }
+            
+            if stock_sym:
+                # This is a stock-specific level
+                if stock_sym not in stock_levels:
+                    stock_levels[stock_sym] = []
+                stock_levels[stock_sym].append(level_data)
+            else:
+                # Traditional index level
+                if idx_type in levels:
+                    levels[idx_type].append(level_data)
+        
+        # If stock_symbol was requested, return stock levels
+        if stock_symbol:
+            return stock_levels.get(stock_symbol, [])
+        
+        # Add stock levels to the result
+        if stock_levels:
+            levels['STOCKS'] = stock_levels
         
         return levels
     except Exception as e:
