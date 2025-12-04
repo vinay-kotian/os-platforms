@@ -248,4 +248,60 @@ class ExchangeClient:
             print(f"Error getting instrument tokens: {e}")
         
         return result
+    
+    def search_instruments(self, query: str, exchange: str = 'NSE', limit: int = 20) -> List[Dict]:
+        """
+        Search for instruments by symbol or name
+        
+        Args:
+            query: Search query (symbol or name)
+            exchange: Exchange name (default: 'NSE')
+            limit: Maximum number of results (default: 20)
+        
+        Returns:
+            List of instrument dictionaries with tradingsymbol, name, exchange, instrument_type
+        """
+        if not self._ensure_kite_initialized():
+            return []
+        
+        if not query or len(query) < 2:
+            return []
+        
+        try:
+            # Get all instruments for the exchange
+            instruments = self.kite.instruments(exchange)
+            
+            # Normalize query for case-insensitive search
+            query_upper = query.upper().strip()
+            
+            # Filter instruments that match the query
+            results = []
+            for instrument in instruments:
+                tradingsymbol = instrument.get('tradingsymbol', '').upper()
+                name = instrument.get('name', '').upper()
+                
+                # Match if query is in tradingsymbol or name
+                if query_upper in tradingsymbol or query_upper in name:
+                    results.append({
+                        'tradingsymbol': instrument.get('tradingsymbol'),
+                        'name': instrument.get('name'),
+                        'exchange': instrument.get('exchange', exchange),
+                        'instrument_type': instrument.get('instrument_type', 'EQ'),
+                        'segment': instrument.get('segment', '')
+                    })
+                    
+                    # Stop if we've reached the limit
+                    if len(results) >= limit:
+                        break
+            
+            # Sort by relevance (exact matches first, then prefix matches)
+            results.sort(key=lambda x: (
+                0 if x['tradingsymbol'].upper().startswith(query_upper) else 1,
+                x['tradingsymbol']
+            ))
+            
+            return results
+        except Exception as e:
+            print(f"Error searching instruments: {e}")
+            return []
 

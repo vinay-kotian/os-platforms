@@ -51,6 +51,16 @@ option_token_to_symbol = {}
 # Key: tradingsymbol, Value: instrument_token
 option_symbol_to_token = {}
 
+# Global dictionaries for custom stocks WebSocket tracking
+# Key: 'EXCHANGE:SYMBOL' (e.g., 'NSE:LT'), Value: {'last_price': price, 'timestamp': timestamp, 'previous_close': close}
+custom_stock_websocket_prices = {}
+# Mapping from instrument_token to stock key for custom stocks
+# Key: instrument_token, Value: 'EXCHANGE:SYMBOL'
+custom_stock_token_to_key = {}
+# Mapping from stock key to instrument_token for custom stocks
+# Key: 'EXCHANGE:SYMBOL', Value: instrument_token
+custom_stock_key_to_token = {}
+
 # Global WebSocket ticker instance
 kws = None
 continuous_websocket_running = False
@@ -212,6 +222,82 @@ def subscribe_option_to_websocket(tradingsymbol, exchange="NFO"):
         
     except Exception as e:
         print(f"Error subscribing option {tradingsymbol} to WebSocket: {e}")
+        return False
+
+
+def subscribe_custom_stock_to_websocket(exchange, tradingsymbol):
+    """
+    Subscribe to a custom stock in the WebSocket for real-time price updates.
+    
+    Args:
+        exchange: Exchange name (e.g., "NSE")
+        tradingsymbol: Trading symbol (e.g., "LT", "RELIANCE")
+    
+    Returns:
+        bool: True if subscribed successfully, False otherwise
+    """
+    global continuous_kws, kite, custom_stock_key_to_token, custom_stock_token_to_key, custom_stock_websocket_prices
+    
+    if not continuous_kws or not continuous_websocket_running:
+        print(f"⚠️  WebSocket not running - cannot subscribe to {exchange}:{tradingsymbol}")
+        return False
+    
+    if not kite:
+        print(f"⚠️  KiteConnect not initialized - cannot subscribe to {exchange}:{tradingsymbol}")
+        return False
+    
+    try:
+        stock_key = f"{exchange}:{tradingsymbol}"
+        
+        # Check if already subscribed
+        if stock_key in custom_stock_key_to_token:
+            print(f"Already subscribed to {stock_key}")
+            return True
+        
+        # Get instrument token for the stock
+        instruments = kite.instruments(exchange)
+        stock_instrument = next(
+            (inst for inst in instruments if inst.get('tradingsymbol') == tradingsymbol),
+            None
+        )
+        
+        if not stock_instrument:
+            print(f"⚠️  Stock {stock_key} not found in instruments")
+            return False
+        
+        stock_token = stock_instrument['instrument_token']
+        
+        # Store mappings
+        custom_stock_key_to_token[stock_key] = stock_token
+        custom_stock_token_to_key[stock_token] = stock_key
+        
+        # Initialize price in custom_stock_websocket_prices
+        custom_stock_websocket_prices[stock_key] = {
+            'last_price': 0,
+            'timestamp': None,
+            'previous_close': 0
+        }
+        
+        # Get previous close price for change calculation
+        try:
+            quote = kite.quote(stock_key)
+            stock_data = quote.get(stock_key, {})
+            previous_close = stock_data.get('ohlc', {}).get('close', 0)
+            custom_stock_websocket_prices[stock_key]['previous_close'] = previous_close
+        except Exception as e:
+            print(f"Warning: Could not fetch previous close for {stock_key}: {e}")
+        
+        # Subscribe to the stock in WebSocket
+        continuous_kws.subscribe([stock_token])
+        continuous_kws.set_mode(continuous_kws.MODE_LTP, [stock_token])
+        
+        print(f"✅ Subscribed to custom stock {stock_key} (token: {stock_token}) for WebSocket price tracking")
+        return True
+        
+    except Exception as e:
+        print(f"Error subscribing custom stock {exchange}:{tradingsymbol} to WebSocket: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -2898,6 +2984,7 @@ def start_continuous_websocket():
         try:
             price_updates = {}
             global price_history, option_websocket_prices, option_token_to_symbol  # Access global variables
+            global custom_stock_token_to_key, custom_stock_websocket_prices  # Access custom stock globals
             
             for tick in ticks:
                 instrument_token = tick['instrument_token']
@@ -2916,6 +3003,43 @@ def start_continuous_websocket():
                         'timestamp': timestamp
                     }
                     # Continue to next tick (don't process as underlying)
+                    continue
+                
+                # Check if this is a custom stock
+                if instrument_token in custom_stock_token_to_key:
+                    stock_key = custom_stock_token_to_key[instrument_token]
+                    stock_data = custom_stock_websocket_prices.get(stock_key, {})
+                    previous_close = stock_data.get('previous_close', 0)
+                    
+                    # Update custom stock price
+                    custom_stock_websocket_prices[stock_key] = {
+                        'last_price': last_price,
+                        'timestamp': timestamp,
+                        'previous_close': previous_close
+                    }
+                    
+                    # Calculate change and change_percent
+                    change = last_price - previous_close if previous_close > 0 else 0
+                    change_percent = (change / previous_close * 100) if previous_close > 0 else 0
+                    
+                    # Add to price_updates
+                    if 'custom_stocks' not in price_updates:
+                        price_updates['custom_stocks'] = {}
+                    
+                    # Parse exchange and symbol from stock_key
+                    parts = stock_key.split(':')
+                    exchange_name = parts[0] if len(parts) > 0 else 'NSE'
+                    symbol_name = parts[1] if len(parts) > 1 else stock_key
+                    
+                    price_updates['custom_stocks'][stock_key] = {
+                        'name': symbol_name,
+                        'current_price': last_price,
+                        'change': change,
+                        'change_percent': change_percent,
+                        'previous_close': previous_close,
+                        'last_updated': timestamp
+                    }
+                    # Continue to next tick (don't process as NIFTY/BANK_NIFTY)
                     continue
                 
                 if instrument_token == nifty_token:
@@ -3000,7 +3124,10 @@ def start_continuous_websocket():
                         else:
                             on_ticks._update_count = 1
                         if on_ticks._update_count % 10 == 0:
-                            print(f"Emitted price update #{on_ticks._update_count}: NIFTY={price_updates.get('nifty', {}).get('current_price', 'N/A')}, BANK_NIFTY={price_updates.get('bank_nifty', {}).get('current_price', 'N/A')}")
+                            nifty_price = price_updates.get('nifty', {}).get('current_price', 'N/A')
+                            bank_nifty_price = price_updates.get('bank_nifty', {}).get('current_price', 'N/A')
+                            custom_count = len(price_updates.get('custom_stocks', {}))
+                            print(f"Emitted price update #{on_ticks._update_count}: NIFTY={nifty_price}, BANK_NIFTY={bank_nifty_price}, Custom stocks={custom_count}")
                     except Exception as emit_error:
                         print(f"Error emitting price update: {emit_error}")
                         import traceback

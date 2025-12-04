@@ -128,6 +128,8 @@ def api_get_quotes():
         
         # Fetch quotes for all stocks
         result = {}
+        rate_limit_error = None
+        
         for stock in stocks:
             # Handle both "NSE:RELIANCE" and {"exchange": "NSE", "symbol": "RELIANCE"} formats
             if isinstance(stock, dict):
@@ -144,9 +146,30 @@ def api_get_quotes():
                     symbol = stock
             
             if symbol:
-                price_data = price_service.get_price(exchange, symbol)
-                if price_data:
-                    result[f"{exchange}:{symbol}"] = price_data.to_dict()
+                try:
+                    price_data = price_service.get_price(exchange, symbol)
+                    if price_data:
+                        result[f"{exchange}:{symbol}"] = price_data.to_dict()
+                except Exception as e:
+                    error_msg = str(e)
+                    # Check for rate limit errors
+                    if "Too many requests" in error_msg or "rate limit" in error_msg.lower():
+                        rate_limit_error = error_msg
+                        # Stop processing more stocks to avoid further rate limit hits
+                        break
+                    # For other errors, just skip this stock
+                    print(f"Error fetching price for {exchange}:{symbol}: {error_msg}")
+            
+            # Add small delay between requests to avoid rate limits (50ms)
+            import time
+            time.sleep(0.05)
+        
+        # If we hit a rate limit, return error
+        if rate_limit_error:
+            return jsonify({
+                'success': False,
+                'error': rate_limit_error
+            }), 429  # HTTP 429 Too Many Requests
         
         return jsonify({
             'success': True,
@@ -176,10 +199,78 @@ def api_get_status():
         }), 500
 
 
+@prices_bp.route('/api/search', methods=['GET'])
+@login_required
+def api_search_instruments():
+    """API endpoint to search for instruments by symbol or name"""
+    try:
+        query = request.args.get('q', '').strip()
+        exchange = request.args.get('exchange', 'NSE')
+        limit = int(request.args.get('limit', 20))
+        
+        if not query or len(query) < 2:
+            return jsonify({
+                'success': True,
+                'instruments': []
+            }), 200
+        
+        # Use ExchangeClient to search
+        exchange_client = ExchangeClient()
+        results = exchange_client.search_instruments(query, exchange, limit)
+        
+        return jsonify({
+            'success': True,
+            'instruments': results
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error searching instruments: {str(e)}'
+        }), 500
+
+
 # Legacy endpoint for backward compatibility
 @prices_bp.route('/api/fetch-websocket', methods=['GET'])
 @login_required
 def api_fetch_prices_websocket():
     """API endpoint to fetch prices using WebSocket (legacy endpoint)"""
     return api_fetch_prices()
+
+
+@prices_bp.route('/api/subscribe', methods=['POST'])
+@login_required
+def api_subscribe_stock():
+    """API endpoint to subscribe a custom stock to WebSocket for real-time updates"""
+    try:
+        data = request.get_json()
+        exchange = data.get('exchange', 'NSE')
+        symbol = data.get('symbol')
+        
+        if not symbol:
+            return jsonify({
+                'success': False,
+                'error': 'Missing required parameter: symbol'
+            }), 400
+        
+        # Import the subscription function
+        from services import subscribe_custom_stock_to_websocket
+        
+        success = subscribe_custom_stock_to_websocket(exchange, symbol)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': f'Subscribed {exchange}:{symbol} to WebSocket'
+            }), 200
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to subscribe {exchange}:{symbol} to WebSocket. WebSocket may not be running.'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Error subscribing stock: {str(e)}'
+        }), 500
 

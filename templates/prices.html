@@ -116,11 +116,16 @@
                     <option value="MCX">MCX</option>
                 </select>
             </div>
-            <div class="form-control flex-2">
+            <div class="form-control flex-2 relative">
                 <label class="label">
                     <span class="label-text">Stock Symbol</span>
                 </label>
-                <input type="text" id="stockSymbol" class="input input-bordered" placeholder="e.g., RELIANCE, TCS, INFY">
+                <div class="relative">
+                    <input type="text" id="stockSymbol" class="input input-bordered w-full" placeholder="e.g., RELIANCE, TCS, INFY" autocomplete="off">
+                    <div id="stockSymbolSuggestions" class="absolute z-50 w-full mt-1 bg-base-100 border border-base-300 rounded-lg shadow-lg max-h-60 overflow-auto hidden custom-scrollbar">
+                        <!-- Suggestions will be populated here -->
+                    </div>
+                </div>
             </div>
             <div class="form-control flex-shrink-0">
                 <label class="label">
@@ -334,6 +339,7 @@
 // Custom Stocks Management
 let customStocks = []; // Array of {exchange, symbol, key}
 let stockLevels = {}; // Object mapping stock key to array of levels {uuid, value}
+let customStocksRefreshInterval = null; // Store interval ID for custom stocks refresh
 
 // Load stocks from localStorage on page load
 function loadCustomStocks() {
@@ -342,6 +348,15 @@ function loadCustomStocks() {
         try {
             customStocks = JSON.parse(saved);
             renderCustomStocks();
+            
+            // Subscribe all stocks to WebSocket when loaded
+            // Wait a bit for WebSocket to connect first
+            setTimeout(() => {
+                customStocks.forEach(stock => {
+                    subscribeStockToWebSocket(stock.exchange, stock.symbol);
+                });
+            }, 2000);
+            
             fetchCustomStocksPrices();
         } catch (e) {
             console.error('Error loading custom stocks:', e);
@@ -368,8 +383,42 @@ function addStock(exchange, symbol) {
     customStocks.push({ exchange, symbol, key });
     saveCustomStocks();
     renderCustomStocks();
+    
+    // Subscribe to WebSocket for real-time updates
+    subscribeStockToWebSocket(exchange, symbol);
+    
+    // Fetch initial price (will use WebSocket for updates)
     fetchCustomStocksPrices();
     updateStockLevelSelector();
+    // Restart auto-refresh interval if needed (only if WebSocket not connected)
+    setupCustomStocksAutoRefresh();
+}
+
+// Subscribe a stock to WebSocket for real-time price updates
+function subscribeStockToWebSocket(exchange, symbol) {
+    if (!isConnected) {
+        console.log(`WebSocket not connected, will subscribe ${exchange}:${symbol} when connected`);
+        return;
+    }
+    
+    fetch('/prices/api/subscribe', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ exchange, symbol })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log(`✅ Subscribed ${exchange}:${symbol} to WebSocket`);
+        } else {
+            console.warn(`⚠️ Failed to subscribe ${exchange}:${symbol} to WebSocket:`, data.error);
+        }
+    })
+    .catch(error => {
+        console.error(`Error subscribing ${exchange}:${symbol} to WebSocket:`, error);
+    });
 }
 
 // Remove a stock
@@ -381,6 +430,8 @@ function removeStock(key) {
     renderCustomStocks();
     updateStockLevelSelector();
     renderAllStockLevels();
+    // Restart auto-refresh interval (will clear if no stocks left)
+    setupCustomStocksAutoRefresh();
 }
 
 // Render custom stocks UI
@@ -437,9 +488,17 @@ function renderCustomStocks() {
 
 // Fetch prices for all custom stocks
 function fetchCustomStocksPrices() {
-    if (customStocks.length === 0) return;
+    // Early return if no stocks to avoid unnecessary API calls
+    if (!customStocks || customStocks.length === 0) {
+        return;
+    }
     
     const stocks = customStocks.map(s => `${s.exchange}:${s.symbol}`);
+    
+    // Only make API call if we have stocks
+    if (stocks.length === 0) {
+        return;
+    }
     
     fetch('/prices/api/quotes', {
         method: 'POST',
@@ -462,6 +521,28 @@ function fetchCustomStocksPrices() {
                     updateStockCardError(stock.key, 'Price not available');
                 }
             });
+        } else if (data.error) {
+            // Handle rate limit errors
+            if (data.error.includes('Too many requests') || data.error.includes('rate limit')) {
+                console.warn('Rate limit detected for custom stocks, temporarily stopping polling');
+                // Stop polling temporarily
+                if (customStocksRefreshInterval) {
+                    clearInterval(customStocksRefreshInterval);
+                    customStocksRefreshInterval = null;
+                    // Restart after 60 seconds
+                    setTimeout(() => {
+                        setupCustomStocksAutoRefresh();
+                    }, 60000);
+                }
+                // Show error on all stocks
+                customStocks.forEach(stock => {
+                    updateStockCardError(stock.key, 'Rate limited - retrying in 60s');
+                });
+            } else {
+                customStocks.forEach(stock => {
+                    updateStockCardError(stock.key, data.error || 'Error fetching price');
+                });
+            }
         }
     })
     .catch(error => {
@@ -470,6 +551,51 @@ function fetchCustomStocksPrices() {
             updateStockCardError(stock.key, 'Error fetching price');
         });
     });
+}
+
+// Setup or clear the auto-refresh interval for custom stocks
+function setupCustomStocksAutoRefresh() {
+    // Clear existing interval if any
+    if (customStocksRefreshInterval) {
+        clearInterval(customStocksRefreshInterval);
+        customStocksRefreshInterval = null;
+    }
+    
+    // Only set up interval if there are custom stocks AND WebSocket is not connected
+    // Custom stocks should use WebSocket when available to avoid rate limits
+    if (customStocks && customStocks.length > 0 && !isConnected) {
+        // Use longer interval to avoid rate limits (30 seconds)
+        // Only poll if WebSocket is not working
+        customStocksRefreshInterval = setInterval(() => {
+            // Skip if WebSocket is now connected
+            if (isConnected) {
+                if (customStocksRefreshInterval) {
+                    clearInterval(customStocksRefreshInterval);
+                    customStocksRefreshInterval = null;
+                }
+                return;
+            }
+            
+            // Double-check stocks still exist before making API call
+            if (customStocks && customStocks.length > 0) {
+                fetchCustomStocksPrices();
+                // Also update level displays (without re-rendering, which would reset unsaved inputs)
+                customStocks.forEach(stock => {
+                    if (stockLevels[stock.key]) {
+                        stockLevels[stock.key].forEach(level => {
+                            updateStockLevelDisplay(stock.key, level.uuid);
+                        });
+                    }
+                });
+            } else {
+                // No stocks, clear the interval
+                if (customStocksRefreshInterval) {
+                    clearInterval(customStocksRefreshInterval);
+                    customStocksRefreshInterval = null;
+                }
+            }
+        }, 30000); // Poll every 30 seconds to avoid rate limits (only when WebSocket is not available)
+    }
 }
 
 
@@ -945,26 +1071,64 @@ const socket = io();
 
 // Connection status
 let isConnected = false;
+let lastPriceUpdateTime = null;
+let fallbackPollingInterval = null;
+let priceUpdateCheckInterval = null;
 
 socket.on('connect', function() {
     console.log('Connected to WebSocket server');
     isConnected = true;
     updateConnectionStatus(true);
+    lastPriceUpdateTime = Date.now();
+    
+    // Stop REST API polling for custom stocks when WebSocket is connected
+    if (customStocksRefreshInterval) {
+        clearInterval(customStocksRefreshInterval);
+        customStocksRefreshInterval = null;
+        console.log('Stopped REST API polling for custom stocks - WebSocket is connected');
+    }
+    
+    // Subscribe all custom stocks to WebSocket
+    if (customStocks && customStocks.length > 0) {
+        console.log('Subscribing custom stocks to WebSocket...');
+        customStocks.forEach(stock => {
+            subscribeStockToWebSocket(stock.exchange, stock.symbol);
+        });
+    }
+    
+    // Start monitoring for price updates
+    startPriceUpdateMonitoring();
 });
 
 socket.on('disconnect', function() {
     console.log('Disconnected from WebSocket server');
     isConnected = false;
     updateConnectionStatus(false);
+    // Start fallback polling when WebSocket disconnects
+    startFallbackPolling();
+    
+    // Stop monitoring
+    if (priceUpdateCheckInterval) {
+        clearInterval(priceUpdateCheckInterval);
+        priceUpdateCheckInterval = null;
+    }
 });
 
 socket.on('connected', function(data) {
     console.log('WebSocket handshake complete:', data);
 });
 
+socket.on('error', function(error) {
+    console.error('WebSocket error:', error);
+    isConnected = false;
+    updateConnectionStatus(false);
+    startFallbackPolling();
+});
+
 // Listen for continuous price updates
 socket.on('price_update', function(data) {
     console.log('Received price update:', data);
+    lastPriceUpdateTime = Date.now();
     
     // Update Nifty data if available
     if (data.nifty) {
@@ -981,7 +1145,38 @@ socket.on('price_update', function(data) {
             updateBankNiftyPrice(data.bank_nifty.current_price);
         }
     }
+    
+    // Update custom stocks if available (when WebSocket supports custom stocks)
+    if (data.custom_stocks && typeof data.custom_stocks === 'object') {
+        Object.keys(data.custom_stocks).forEach(key => {
+            const priceData = data.custom_stocks[key];
+            if (priceData) {
+                updateStockCard(key, priceData);
+            }
+        });
+    }
 });
+
+// Monitor if we're receiving price updates
+function startPriceUpdateMonitoring() {
+    // Clear existing interval if any
+    if (priceUpdateCheckInterval) {
+        clearInterval(priceUpdateCheckInterval);
+        priceUpdateCheckInterval = null;
+    }
+    
+    // Check every 10 seconds if we're receiving updates
+    priceUpdateCheckInterval = setInterval(() => {
+        if (isConnected) {
+            const timeSinceLastUpdate = Date.now() - (lastPriceUpdateTime || 0);
+            // If no update received in 15 seconds, start fallback polling
+            if (timeSinceLastUpdate > 15000) {
+                console.warn('No price updates received in 15 seconds, starting fallback polling');
+                startFallbackPolling();
+            }
+        }
+    }, 10000);
+}
 
 function updateConnectionStatus(connected) {
     const statusElement = document.getElementById('refreshStatusCompact');
@@ -1009,8 +1204,8 @@ function refreshPrices(showButtonState = false) {
         refreshBtn.disabled = true;
     }
     
-    // Make AJAX call to fetch fresh data via WebSocket
-    fetch('/stocks/fetch-price-websocket')
+    // Make AJAX call to fetch fresh data
+    fetch('/prices/api/fetch')
         .then(response => {
             if (!response.ok) {
                 throw new Error('Network response was not ok');
@@ -1018,17 +1213,21 @@ function refreshPrices(showButtonState = false) {
             return response.json();
         })
         .then(data => {
-            if (data.error) {
-                throw new Error(data.error);
+            if (!data.success || data.error) {
+                throw new Error(data.error || 'Failed to fetch prices');
             }
             
             // Update Nifty data
-            updatePriceCard('nifty', data.nifty);
+            if (data.prices && data.prices.nifty) {
+                updatePriceCard('nifty', data.prices.nifty);
+            }
             
             // Update Bank Nifty data
-            updatePriceCard('bank_nifty', data.bank_nifty);
+            if (data.prices && data.prices.bank_nifty) {
+                updatePriceCard('bank_nifty', data.prices.bank_nifty);
+            }
             
-            console.log('Prices updated successfully via WebSocket');
+            console.log('Prices updated successfully');
         })
         .catch(error => {
             console.error('Error refreshing prices:', error);
@@ -1122,22 +1321,24 @@ function fetchCurrentPrice() {
     setTimeout(() => {
         if (!isConnected) {
             console.log('WebSocket not connected, using fallback fetch');
-            fetch('/stocks/fetch-price-websocket')
+            fetch('/prices/api/fetch')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.error) {
-                        console.error('Error fetching prices:', data.error);
+                    if (!data.success || data.error) {
+                        console.error('Error fetching prices:', data.error || 'Unknown error');
                         return;
                     }
                     
                     // Update Bank Nifty price and levels
-                    if (data.bank_nifty && data.bank_nifty.current_price) {
-                        updateBankNiftyPrice(data.bank_nifty.current_price);
+                    if (data.prices && data.prices.bank_nifty && data.prices.bank_nifty.current_price) {
+                        updateBankNiftyPrice(data.prices.bank_nifty.current_price);
+                        updatePriceCard('bank_nifty', data.prices.bank_nifty);
                     }
                     
                     // Update Nifty 50 price and levels
-                    if (data.nifty && data.nifty.current_price) {
-                        updateNiftyPrice(data.nifty.current_price);
+                    if (data.prices && data.prices.nifty && data.prices.nifty.current_price) {
+                        updateNiftyPrice(data.prices.nifty.current_price);
+                        updatePriceCard('nifty', data.prices.nifty);
                     }
                 })
                 .catch(error => {
@@ -1156,6 +1357,76 @@ function refreshThreeLevels() {
     if (!isConnected) {
         fetchCurrentPrice();
     }
+}
+
+// Start fallback polling when WebSocket is not available or not receiving updates
+function startFallbackPolling() {
+    // Don't start if already polling
+    if (fallbackPollingInterval) {
+        return;
+    }
+    
+    // Don't poll if WebSocket is connected and receiving updates
+    if (isConnected && lastPriceUpdateTime && (Date.now() - lastPriceUpdateTime) < 10000) {
+        console.log('WebSocket is working, skipping fallback polling');
+        return;
+    }
+    
+    console.log('Starting fallback polling for prices (15 second interval to avoid rate limits)');
+    fallbackPollingInterval = setInterval(() => {
+        // Skip if WebSocket is working
+        if (isConnected && lastPriceUpdateTime && (Date.now() - lastPriceUpdateTime) < 10000) {
+            return;
+        }
+        
+        // Fetch prices via API as fallback
+        fetch('/prices/api/fetch')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success && data.prices) {
+                    // Update last update time if we got data
+                    lastPriceUpdateTime = Date.now();
+                    
+                    // Update Nifty data
+                    if (data.prices.nifty) {
+                        updatePriceCard('nifty', data.prices.nifty);
+                        if (data.prices.nifty.current_price) {
+                            updateNiftyPrice(data.prices.nifty.current_price);
+                        }
+                    }
+                    
+                    // Update Bank Nifty data
+                    if (data.prices.bank_nifty) {
+                        updatePriceCard('bank_nifty', data.prices.bank_nifty);
+                        if (data.prices.bank_nifty.current_price) {
+                            updateBankNiftyPrice(data.prices.bank_nifty.current_price);
+                        }
+                    }
+                } else {
+                    console.warn('Failed to fetch prices:', data.error || 'Unknown error');
+                    // If rate limited, increase interval
+                    if (data.error && data.error.includes('Too many requests')) {
+                        console.warn('Rate limit detected, stopping polling temporarily');
+                        if (fallbackPollingInterval) {
+                            clearInterval(fallbackPollingInterval);
+                            fallbackPollingInterval = null;
+                            // Restart after 60 seconds
+                            setTimeout(() => {
+                                startFallbackPolling();
+                            }, 60000);
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error in fallback polling:', error);
+            });
+    }, 15000); // Poll every 15 seconds to avoid rate limits
 }
 
 
@@ -1197,41 +1468,58 @@ document.getElementById('manualRefresh').addEventListener('click', function() {
 
 // Initialize the form on page load
 document.addEventListener('DOMContentLoaded', function() {
-    // Wait for WebSocket connection before initializing
-    // Prices will be updated automatically via WebSocket
-    // Only use fallback if WebSocket fails to connect
-    
     // Load levels from database
     // Use a small delay to ensure DOM is fully ready
     setTimeout(() => {
         loadLevelsFromDatabase(false); // Load all levels
     }, 100);
     
-    // Set up fallback fetch only if WebSocket doesn't connect within 3 seconds
+    // Immediately fetch prices on page load
+    console.log('Fetching initial prices on page load');
+    fetch('/prices/api/fetch')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.prices) {
+                // Update Nifty data
+                if (data.prices.nifty) {
+                    updatePriceCard('nifty', data.prices.nifty);
+                    if (data.prices.nifty.current_price) {
+                        updateNiftyPrice(data.prices.nifty.current_price);
+                    }
+                }
+                
+                // Update Bank Nifty data
+                if (data.prices.bank_nifty) {
+                    updatePriceCard('bank_nifty', data.prices.bank_nifty);
+                    if (data.prices.bank_nifty.current_price) {
+                        updateBankNiftyPrice(data.prices.bank_nifty.current_price);
+                    }
+                }
+                console.log('Initial prices loaded successfully');
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching initial prices:', error);
+        });
+    
+    // Start fallback polling immediately (will work alongside WebSocket if connected)
+    // This ensures prices always refresh even if WebSocket has issues
+    // Start fallback polling only if WebSocket doesn't connect or isn't receiving updates
+    // Wait a bit to see if WebSocket connects and starts receiving updates
     setTimeout(() => {
-        if (!isConnected) {
-            console.log('WebSocket connection timeout, using fallback');
-            refreshThreeLevels();
+        if (!isConnected || !lastPriceUpdateTime || (Date.now() - (lastPriceUpdateTime || 0)) > 10000) {
+            console.log('WebSocket not working, starting fallback polling');
+            startFallbackPolling();
+        } else {
+            console.log('WebSocket is working, skipping fallback polling');
         }
-    }, 3000);
+    }, 5000); // Wait 5 seconds to see if WebSocket works
     
     // Initialize custom stocks
     loadCustomStocks();
     
-    // Set up auto-refresh for custom stocks every 5 seconds
-    setInterval(() => {
-        fetchCustomStocksPrices();
-        // Also update level displays (without re-rendering, which would reset unsaved inputs)
-        customStocks.forEach(stock => {
-            if (stockLevels[stock.key]) {
-                stockLevels[stock.key].forEach(level => {
-                    updateStockLevelDisplay(stock.key, level.uuid);
-                });
-            }
-        });
-        // Don't call renderAllStockLevels() here - it resets unsaved input values
-        // Only update the display elements, not the entire HTML
-    }, 5000);
+    // Set up auto-refresh for custom stocks (only if stocks exist)
+    setupCustomStocksAutoRefresh();
     
     // Add stock button handler
     const addStockBtn = document.getElementById('addStockBtn');
@@ -1256,9 +1544,141 @@ document.addEventListener('DOMContentLoaded', function() {
     if (stockSymbolInput) {
         stockSymbolInput.addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
+                // If suggestions are visible and one is selected, use that instead
+                const suggestionsDiv = document.getElementById('stockSymbolSuggestions');
+                const selected = suggestionsDiv?.querySelector('.suggestion-item.active');
+                if (selected && !suggestionsDiv.classList.contains('hidden')) {
+                    e.preventDefault();
+                    selected.click();
+                    return;
+                }
                 addStockBtn.click();
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                const suggestionsDiv = document.getElementById('stockSymbolSuggestions');
+                if (!suggestionsDiv.classList.contains('hidden')) {
+                    const items = suggestionsDiv.querySelectorAll('.suggestion-item');
+                    const active = suggestionsDiv.querySelector('.suggestion-item.active');
+                    if (active) {
+                        active.classList.remove('active');
+                        const next = active.nextElementSibling;
+                        if (next) {
+                            next.classList.add('active');
+                            next.scrollIntoView({ block: 'nearest' });
+                        }
+                    } else if (items.length > 0) {
+                        items[0].classList.add('active');
+                    }
+                }
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                const suggestionsDiv = document.getElementById('stockSymbolSuggestions');
+                if (!suggestionsDiv.classList.contains('hidden')) {
+                    const active = suggestionsDiv.querySelector('.suggestion-item.active');
+                    if (active) {
+                        active.classList.remove('active');
+                        const prev = active.previousElementSibling;
+                        if (prev) {
+                            prev.classList.add('active');
+                            prev.scrollIntoView({ block: 'nearest' });
+                        }
+                    }
+                }
+            } else if (e.key === 'Escape') {
+                const suggestionsDiv = document.getElementById('stockSymbolSuggestions');
+                suggestionsDiv?.classList.add('hidden');
             }
         });
+        
+        // Autocomplete functionality
+        let searchTimeout = null;
+        stockSymbolInput.addEventListener('input', function() {
+            const query = this.value.trim();
+            const exchange = document.getElementById('stockExchange').value;
+            const suggestionsDiv = document.getElementById('stockSymbolSuggestions');
+            
+            // Clear previous timeout
+            if (searchTimeout) {
+                clearTimeout(searchTimeout);
+            }
+            
+            // Hide suggestions if query is too short
+            if (query.length < 2) {
+                suggestionsDiv.classList.add('hidden');
+                return;
+            }
+            
+            // Debounce search (wait 300ms after user stops typing)
+            searchTimeout = setTimeout(() => {
+                fetch(`/prices/api/search?q=${encodeURIComponent(query)}&exchange=${encodeURIComponent(exchange)}&limit=10`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.instruments && data.instruments.length > 0) {
+                            // Render suggestions
+                            suggestionsDiv.innerHTML = data.instruments.map(instrument => {
+                                const symbol = instrument.tradingsymbol;
+                                const name = instrument.name || '';
+                                const type = instrument.instrument_type || 'EQ';
+                                return `
+                                    <div class="suggestion-item px-4 py-2 hover:bg-base-200 cursor-pointer border-b border-base-300 last:border-b-0" 
+                                         data-symbol="${symbol}" 
+                                         data-exchange="${instrument.exchange}">
+                                        <div class="font-semibold text-sm">${symbol}</div>
+                                        ${name ? `<div class="text-xs text-base-content/60">${name} (${type})</div>` : ''}
+                                    </div>
+                                `;
+                            }).join('');
+                            
+                            // Add click handlers
+                            suggestionsDiv.querySelectorAll('.suggestion-item').forEach(item => {
+                                item.addEventListener('click', function() {
+                                    const symbol = this.getAttribute('data-symbol');
+                                    const exchange = this.getAttribute('data-exchange');
+                                    stockSymbolInput.value = symbol;
+                                    document.getElementById('stockExchange').value = exchange;
+                                    suggestionsDiv.classList.add('hidden');
+                                    // Optionally auto-add the stock
+                                    // addStock(exchange, symbol);
+                                });
+                                
+                                item.addEventListener('mouseenter', function() {
+                                    suggestionsDiv.querySelectorAll('.suggestion-item').forEach(i => i.classList.remove('active'));
+                                    this.classList.add('active');
+                                });
+                            });
+                            
+                            suggestionsDiv.classList.remove('hidden');
+                        } else {
+                            suggestionsDiv.innerHTML = '<div class="px-4 py-2 text-sm text-base-content/60">No results found</div>';
+                            suggestionsDiv.classList.remove('hidden');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching suggestions:', error);
+                        suggestionsDiv.classList.add('hidden');
+                    });
+            }, 300);
+        });
+        
+        // Hide suggestions when clicking outside
+        document.addEventListener('click', function(e) {
+            const suggestionsDiv = document.getElementById('stockSymbolSuggestions');
+            if (suggestionsDiv && !suggestionsDiv.contains(e.target) && e.target !== stockSymbolInput) {
+                suggestionsDiv.classList.add('hidden');
+            }
+        });
+        
+        // Update suggestions when exchange changes
+        const stockExchangeSelect = document.getElementById('stockExchange');
+        if (stockExchangeSelect) {
+            stockExchangeSelect.addEventListener('change', function() {
+                const query = stockSymbolInput.value.trim();
+                if (query.length >= 2) {
+                    // Trigger search again with new exchange
+                    stockSymbolInput.dispatchEvent(new Event('input'));
+                }
+            });
+        }
     }
     
     // Add event listener for stock level dropdown to filter display
@@ -1277,14 +1697,14 @@ let bankNiftyPrice = 0;
 let niftyPrice = 0;
 
 // Store levels as arrays with UUIDs
-let bankLevels = []; // Array of {uuid, value}
-let niftyLevels = []; // Array of {uuid, value}
+let bankLevels = []; // Array of {uuid, value, stop_loss, target_percentage}
+let niftyLevels = []; // Array of {uuid, value, stop_loss, target_percentage}
 
 // Bank Nifty Functions - Dynamic Levels
 function addBankLevel() {
     // Create a new empty level row
     const levelUuid = 'temp_' + Date.now();
-    bankLevels.push({uuid: levelUuid, value: null});
+    bankLevels.push({uuid: levelUuid, value: null, stop_loss: null, target_percentage: null});
     renderBankLevels();
 }
 
@@ -1293,20 +1713,37 @@ function setBankLevel(uuid) {
     if (levelIndex === -1) return;
     
     const input = document.getElementById(`bankLevelInput_${uuid}`);
+    const stopLossInput = document.getElementById(`bankStopLoss_${uuid}`);
+    const targetInput = document.getElementById(`bankTarget_${uuid}`);
+    
     const value = parseFloat(input.value);
+    const stopLossPercentage = stopLossInput.value ? parseFloat(stopLossInput.value) : null;
+    const targetPercentage = targetInput.value ? parseFloat(targetInput.value) : null;
     
     if (isNaN(value) || value <= 0) {
-        alert('Please enter a valid positive number');
+        alert('Please enter a valid positive entry price');
+        return;
+    }
+    
+    if (stopLossPercentage !== null && (isNaN(stopLossPercentage) || stopLossPercentage <= 0)) {
+        alert('Please enter a valid positive stop loss percentage');
+        return;
+    }
+    
+    if (targetPercentage !== null && (isNaN(targetPercentage) || targetPercentage <= 0)) {
+        alert('Please enter a valid positive target percentage');
         return;
     }
     
     const existingUuid = bankLevels[levelIndex].uuid.startsWith('temp_') ? null : bankLevels[levelIndex].uuid;
     bankLevels[levelIndex].value = value;
+    bankLevels[levelIndex].stop_loss = stopLossPercentage;
+    bankLevels[levelIndex].target_percentage = targetPercentage;
     
     // Save to database
-    saveLevelToDatabase('BANK_NIFTY', value, existingUuid)
+    saveLevelToDatabase('BANK_NIFTY', value, existingUuid, stopLossPercentage, targetPercentage)
         .then(() => {
-            console.log(`Bank Nifty Level set to: ${value}`);
+            console.log(`Bank Nifty Level set to: Entry=${value}, SL=${stopLossPercentage}%, Tgt=${targetPercentage}%`);
             renderBankLevels();
         })
         .catch(error => {
@@ -1395,30 +1832,51 @@ function renderBankLevels() {
     
     bankLevels.forEach((level, index) => {
         const levelDiv = document.createElement('div');
-        levelDiv.className = 'flex items-center gap-2';
+        levelDiv.className = 'border border-base-300 rounded-lg p-2 mb-2';
         levelDiv.innerHTML = `
-            <div class="flex-1">
-                <input type="number" id="bankLevelInput_${level.uuid}" 
-                       placeholder="Enter level value" 
-                       class="input input-bordered input-sm w-full" 
-                       step="0.01" 
-                       value="${level.value || ''}">
-            </div>
-            <button class="btn btn-primary btn-sm px-3" onclick="setBankLevel('${level.uuid}')">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-            </button>
-            <button class="btn btn-error btn-sm px-3" onclick="deleteBankLevel('${level.uuid}')">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-            </button>
-            <div class="flex-1 min-w-0">
-                <div class="text-xs text-gray-600 truncate" id="bankLevelStatus_${level.uuid}">
-                    ${level.value ? `₹${level.value.toFixed(2)}` : 'Not set'}
+            <div class="flex items-center gap-2">
+                <div class="flex-1">
+                    <label class="text-xs text-base-content/60 mb-1 block">Entry</label>
+                    <input type="number" id="bankLevelInput_${level.uuid}" 
+                           placeholder="Entry price" 
+                           class="input input-bordered input-xs w-full" 
+                           step="0.01" 
+                           value="${level.value || ''}">
                 </div>
-                <div class="text-xs text-gray-500 truncate" id="bankLevelDistance_${level.uuid}"></div>
+                <div class="flex-1">
+                    <label class="text-xs text-base-content/60 mb-1 block">SL %</label>
+                    <input type="number" id="bankStopLoss_${level.uuid}" 
+                           placeholder="Stop Loss %" 
+                           class="input input-bordered input-xs w-full" 
+                           step="0.1" 
+                           value="${level.stop_loss || ''}">
+                </div>
+                <div class="flex-1">
+                    <label class="text-xs text-base-content/60 mb-1 block">Tgt %</label>
+                    <input type="number" id="bankTarget_${level.uuid}" 
+                           placeholder="Target %" 
+                           class="input input-bordered input-xs w-full" 
+                           step="0.1" 
+                           value="${level.target_percentage || ''}">
+                </div>
+                <div class="flex gap-1 pt-5">
+                    <button class="btn btn-primary btn-xs px-2" onclick="setBankLevel('${level.uuid}')" title="Save">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </button>
+                    <button class="btn btn-error btn-xs px-2" onclick="deleteBankLevel('${level.uuid}')" title="Delete">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs mt-2" id="bankLevelInfo_${level.uuid}">
+                <div class="flex-1 text-gray-600" id="bankLevelStatus_${level.uuid}">
+                    ${level.value ? `Entry: ₹${level.value.toFixed(2)}` : 'Not set'}
+                </div>
+                <div class="text-gray-500" id="bankLevelDistance_${level.uuid}"></div>
             </div>
         `;
         container.appendChild(levelDiv);
@@ -1440,13 +1898,22 @@ function updateBankLevelDisplay(uuid) {
     if (!statusElement || !distanceElement) return;
     
     if (level.value !== null) {
-        statusElement.textContent = `₹${level.value.toFixed(2)}`;
-        statusElement.className = 'text-xs text-success font-semibold';
+        let statusText = `Entry: ₹${level.value.toFixed(2)}`;
+        if (level.stop_loss) {
+            const stopLossPrice = level.value * (1 - level.stop_loss / 100);
+            statusText += ` | SL: ₹${stopLossPrice.toFixed(2)} (${level.stop_loss}%)`;
+        }
+        if (level.target_percentage) {
+            const targetPrice = level.value * (1 + level.target_percentage / 100);
+            statusText += ` | Tgt: ₹${targetPrice.toFixed(2)} (${level.target_percentage}%)`;
+        }
+        statusElement.textContent = statusText;
+        statusElement.className = 'text-xs text-gray-600';
         
         if (bankNiftyPrice > 0) {
             const distance = Math.abs(bankNiftyPrice - level.value);
             const distancePercent = (distance / level.value) * 100;
-            distanceElement.textContent = `₹${distance.toFixed(2)} (${distancePercent.toFixed(1)}%)`;
+            distanceElement.textContent = `Distance: ₹${distance.toFixed(2)} (${distancePercent.toFixed(1)}%)`;
             
             // Color code based on distance
             if (distancePercent <= 1) {
@@ -1456,6 +1923,8 @@ function updateBankLevelDisplay(uuid) {
             } else {
                 distanceElement.className = 'text-xs text-gray-500';
             }
+        } else {
+            distanceElement.textContent = '';
         }
     } else {
         statusElement.textContent = 'Not set';
@@ -1469,7 +1938,7 @@ function updateBankLevelDisplay(uuid) {
 function addNiftyLevel() {
     // Create a new empty level row
     const levelUuid = 'temp_' + Date.now();
-    niftyLevels.push({uuid: levelUuid, value: null});
+    niftyLevels.push({uuid: levelUuid, value: null, stop_loss: null, target_percentage: null});
     renderNiftyLevels();
 }
 
@@ -1478,20 +1947,37 @@ function setNiftyLevel(uuid) {
     if (levelIndex === -1) return;
     
     const input = document.getElementById(`niftyLevelInput_${uuid}`);
+    const stopLossInput = document.getElementById(`niftyStopLoss_${uuid}`);
+    const targetInput = document.getElementById(`niftyTarget_${uuid}`);
+    
     const value = parseFloat(input.value);
+    const stopLossPercentage = stopLossInput.value ? parseFloat(stopLossInput.value) : null;
+    const targetPercentage = targetInput.value ? parseFloat(targetInput.value) : null;
     
     if (isNaN(value) || value <= 0) {
-        alert('Please enter a valid positive number');
+        alert('Please enter a valid positive entry price');
+        return;
+    }
+    
+    if (stopLossPercentage !== null && (isNaN(stopLossPercentage) || stopLossPercentage <= 0)) {
+        alert('Please enter a valid positive stop loss percentage');
+        return;
+    }
+    
+    if (targetPercentage !== null && (isNaN(targetPercentage) || targetPercentage <= 0)) {
+        alert('Please enter a valid positive target percentage');
         return;
     }
     
     const existingUuid = niftyLevels[levelIndex].uuid.startsWith('temp_') ? null : niftyLevels[levelIndex].uuid;
     niftyLevels[levelIndex].value = value;
+    niftyLevels[levelIndex].stop_loss = stopLossPercentage;
+    niftyLevels[levelIndex].target_percentage = targetPercentage;
     
     // Save to database
-    saveLevelToDatabase('NIFTY_50', value, existingUuid)
+    saveLevelToDatabase('NIFTY_50', value, existingUuid, stopLossPercentage, targetPercentage)
         .then(() => {
-            console.log(`Nifty Level set to: ${value}`);
+            console.log(`Nifty Level set to: Entry=${value}, SL=${stopLossPercentage}%, Tgt=${targetPercentage}%`);
             renderNiftyLevels();
         })
         .catch(error => {
@@ -1580,30 +2066,51 @@ function renderNiftyLevels() {
     
     niftyLevels.forEach((level, index) => {
         const levelDiv = document.createElement('div');
-        levelDiv.className = 'flex items-center gap-2';
+        levelDiv.className = 'border border-base-300 rounded-lg p-2 mb-2';
         levelDiv.innerHTML = `
-            <div class="flex-1">
-                <input type="number" id="niftyLevelInput_${level.uuid}" 
-                       placeholder="Enter level value" 
-                       class="input input-bordered input-sm w-full" 
-                       step="0.01" 
-                       value="${level.value || ''}">
-            </div>
-            <button class="btn btn-primary btn-sm px-3" onclick="setNiftyLevel('${level.uuid}')">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                </svg>
-            </button>
-            <button class="btn btn-error btn-sm px-3" onclick="deleteNiftyLevel('${level.uuid}')">
-                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                </svg>
-            </button>
-            <div class="flex-1 min-w-0">
-                <div class="text-xs text-gray-600 truncate" id="niftyLevelStatus_${level.uuid}">
-                    ${level.value ? `₹${level.value.toFixed(2)}` : 'Not set'}
+            <div class="flex items-center gap-2">
+                <div class="flex-1">
+                    <label class="text-xs text-base-content/60 mb-1 block">Entry</label>
+                    <input type="number" id="niftyLevelInput_${level.uuid}" 
+                           placeholder="Entry price" 
+                           class="input input-bordered input-xs w-full" 
+                           step="0.01" 
+                           value="${level.value || ''}">
                 </div>
-                <div class="text-xs text-gray-500 truncate" id="niftyLevelDistance_${level.uuid}"></div>
+                <div class="flex-1">
+                    <label class="text-xs text-base-content/60 mb-1 block">SL %</label>
+                    <input type="number" id="niftyStopLoss_${level.uuid}" 
+                           placeholder="Stop Loss %" 
+                           class="input input-bordered input-xs w-full" 
+                           step="0.1" 
+                           value="${level.stop_loss || ''}">
+                </div>
+                <div class="flex-1">
+                    <label class="text-xs text-base-content/60 mb-1 block">Tgt %</label>
+                    <input type="number" id="niftyTarget_${level.uuid}" 
+                           placeholder="Target %" 
+                           class="input input-bordered input-xs w-full" 
+                           step="0.1" 
+                           value="${level.target_percentage || ''}">
+                </div>
+                <div class="flex gap-1 pt-5">
+                    <button class="btn btn-primary btn-xs px-2" onclick="setNiftyLevel('${level.uuid}')" title="Save">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </button>
+                    <button class="btn btn-error btn-xs px-2" onclick="deleteNiftyLevel('${level.uuid}')" title="Delete">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 text-xs mt-2" id="niftyLevelInfo_${level.uuid}">
+                <div class="flex-1 text-gray-600" id="niftyLevelStatus_${level.uuid}">
+                    ${level.value ? `Entry: ₹${level.value.toFixed(2)}` : 'Not set'}
+                </div>
+                <div class="text-gray-500" id="niftyLevelDistance_${level.uuid}"></div>
             </div>
         `;
         container.appendChild(levelDiv);
@@ -1625,13 +2132,22 @@ function updateNiftyLevelDisplay(uuid) {
     if (!statusElement || !distanceElement) return;
     
     if (level.value !== null) {
-        statusElement.textContent = `₹${level.value.toFixed(2)}`;
-        statusElement.className = 'text-xs text-success font-semibold';
+        let statusText = `Entry: ₹${level.value.toFixed(2)}`;
+        if (level.stop_loss) {
+            const stopLossPrice = level.value * (1 - level.stop_loss / 100);
+            statusText += ` | SL: ₹${stopLossPrice.toFixed(2)} (${level.stop_loss}%)`;
+        }
+        if (level.target_percentage) {
+            const targetPrice = level.value * (1 + level.target_percentage / 100);
+            statusText += ` | Tgt: ₹${targetPrice.toFixed(2)} (${level.target_percentage}%)`;
+        }
+        statusElement.textContent = statusText;
+        statusElement.className = 'text-xs text-gray-600';
         
         if (niftyPrice > 0) {
             const distance = Math.abs(niftyPrice - level.value);
             const distancePercent = (distance / level.value) * 100;
-            distanceElement.textContent = `₹${distance.toFixed(2)} (${distancePercent.toFixed(1)}%)`;
+            distanceElement.textContent = `Distance: ₹${distance.toFixed(2)} (${distancePercent.toFixed(1)}%)`;
             
             // Color code based on distance
             if (distancePercent <= 1) {
@@ -1641,6 +2157,8 @@ function updateNiftyLevelDisplay(uuid) {
             } else {
                 distanceElement.className = 'text-xs text-gray-500';
             }
+        } else {
+            distanceElement.textContent = '';
         }
     } else {
         statusElement.textContent = 'Not set';
@@ -1819,7 +2337,7 @@ function updateNiftyLevelBreachStatus(uuid, breach) {
 }
 
 // Database functions for three levels
-function saveLevelToDatabase(indexType, levelValue, levelUuid = null) {
+function saveLevelToDatabase(indexType, levelValue, levelUuid = null, stopLossPercentage = null, targetPercentage = null) {
     return fetch('/levels/save', {
         method: 'POST',
         headers: {
@@ -1828,7 +2346,9 @@ function saveLevelToDatabase(indexType, levelValue, levelUuid = null) {
         body: JSON.stringify({
             index_type: indexType,
             level_value: levelValue,
-            uuid: levelUuid
+            uuid: levelUuid,
+            stop_loss: stopLossPercentage,
+            target_percentage: targetPercentage
         })
     })
     .then(response => response.json())
@@ -1891,7 +2411,9 @@ function loadLevelsFromDatabase(todayOnly = false) {
                 if (data.levels.BANK_NIFTY && Array.isArray(data.levels.BANK_NIFTY)) {
                     bankLevels = data.levels.BANK_NIFTY.map(level => ({
                         uuid: level.uuid,
-                        value: level.value
+                        value: level.value || level.level_value,
+                        stop_loss: level.stop_loss || null,
+                        target_percentage: level.target_percentage || null
                     }));
                     console.log(`Loaded ${bankLevels.length} Bank Nifty levels:`, bankLevels);
                 } else {
@@ -1903,7 +2425,9 @@ function loadLevelsFromDatabase(todayOnly = false) {
                 if (data.levels.NIFTY_50 && Array.isArray(data.levels.NIFTY_50)) {
                     niftyLevels = data.levels.NIFTY_50.map(level => ({
                         uuid: level.uuid,
-                        value: level.value
+                        value: level.value || level.level_value,
+                        stop_loss: level.stop_loss || null,
+                        target_percentage: level.target_percentage || null
                     }));
                     console.log(`Loaded ${niftyLevels.length} Nifty 50 levels:`, niftyLevels);
                 } else {
