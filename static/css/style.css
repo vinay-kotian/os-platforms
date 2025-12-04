@@ -204,3 +204,18 @@
     box-shadow: 0 6px 20px 0 rgba(37, 99, 235, 0.4);
     transform: translateY(-1px);
 }
+
+/* Autocomplete suggestions styling */
+.suggestion-item {
+    transition: background-color 0.15s ease;
+}
+
+.suggestion-item:hover,
+.suggestion-item.active {
+    background-color: hsl(var(--p) / 0.1);
+}
+
+.suggestion-item.active {
+    background-color: hsl(var(--p) / 0.15);
+    font-weight: 500;
+}
