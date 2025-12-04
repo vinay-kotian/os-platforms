@@ -427,11 +427,53 @@ function removeStock(key) {
     // Also remove levels for this stock
     delete stockLevels[key];
     saveCustomStocks();
+    
+    // Preserve current prices before re-rendering
+    const preservedPrices = {};
+    customStocks.forEach(stock => {
+        const safeKey = stock.key.replace(/:/g, '-');
+        const priceEl = document.getElementById(`price-${safeKey}`);
+        const changeEl = document.getElementById(`change-${safeKey}`);
+        const updatedEl = document.getElementById(`updated-${safeKey}`);
+        
+        if (priceEl && priceEl.textContent !== 'Loading...') {
+            preservedPrices[stock.key] = {
+                price: priceEl.textContent,
+                change: changeEl ? changeEl.textContent : '--',
+                changeClass: changeEl ? changeEl.className : '',
+                updated: updatedEl ? updatedEl.textContent : '--'
+            };
+        }
+    });
+    
     renderCustomStocks();
+    
+    // Restore preserved prices immediately
+    customStocks.forEach(stock => {
+        if (preservedPrices[stock.key]) {
+            const safeKey = stock.key.replace(/:/g, '-');
+            const priceEl = document.getElementById(`price-${safeKey}`);
+            const changeEl = document.getElementById(`change-${safeKey}`);
+            const updatedEl = document.getElementById(`updated-${safeKey}`);
+            
+            if (priceEl) priceEl.textContent = preservedPrices[stock.key].price;
+            if (changeEl) {
+                changeEl.textContent = preservedPrices[stock.key].change;
+                changeEl.className = preservedPrices[stock.key].changeClass;
+            }
+            if (updatedEl) updatedEl.textContent = preservedPrices[stock.key].updated;
+        }
+    });
+    
     updateStockLevelSelector();
     renderAllStockLevels();
     // Restart auto-refresh interval (will clear if no stocks left)
     setupCustomStocksAutoRefresh();
+    
+    // Fetch fresh prices for all remaining stocks (in case prices changed)
+    if (customStocks.length > 0) {
+        fetchCustomStocksPrices();
+    }
 }
 
 // Render custom stocks UI
@@ -470,7 +512,14 @@ function renderCustomStocks() {
                     <div class="badge badge-sm" id="change-${safeKey}">--</div>
                 </div>
                 <div class="text-xs text-base-content/60 italic mb-4" id="updated-${safeKey}">--</div>
-                
+                <div class="card-actions justify-end">
+                    <button class="btn btn-sm btn-primary" onclick="addStockLevel('${stock.key}')">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                        </svg>
+                        Add Level
+                    </button>
+                </div>
             </div>
         </div>
     `;
