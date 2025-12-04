@@ -278,6 +278,70 @@
     </div>
 </div>
 
+<!-- Add Level Modal -->
+<div id="addLevelModal" class="modal">
+    <div class="modal-box max-w-sm p-5">
+        <h3 class="font-bold text-base mb-3">Add Level</h3>
+        <form id="addLevelForm" onsubmit="handleAddLevelSubmit(event)">
+            <input type="hidden" id="modalStockKey" value="">
+            <input type="hidden" id="modalStockExchange" value="">
+            <input type="hidden" id="modalStockSymbol" value="">
+            
+            <div class="mb-2">
+                <div class="text-xs text-base-content/60 mb-1">Stock</div>
+                <div class="text-sm font-medium" id="modalStockName">-</div>
+            </div>
+            
+            <div class="mb-3">
+                <div class="text-xs text-base-content/60 mb-1">Current Price</div>
+                <div class="text-base font-bold text-primary" id="modalCurrentPrice">-</div>
+            </div>
+            
+            <div class="form-control mb-2">
+                <label class="label py-1">
+                    <span class="label-text text-xs font-semibold">Entry Price <span class="text-error">*</span></span>
+                </label>
+                <input type="number" 
+                       id="modalEntryPrice" 
+                       class="input input-bordered input-sm w-full" 
+                       placeholder="Entry price"
+                       step="0.01"
+                       required>
+            </div>
+            
+            <div class="form-control mb-2">
+                <label class="label py-1">
+                    <span class="label-text text-xs font-semibold">Stop Loss %</span>
+                </label>
+                <input type="number" 
+                       id="modalStopLoss" 
+                       class="input input-bordered input-sm w-full" 
+                       placeholder="e.g., 2.0"
+                       step="0.1"
+                       min="0">
+            </div>
+            
+            <div class="form-control mb-4">
+                <label class="label py-1">
+                    <span class="label-text text-xs font-semibold">Target %</span>
+                </label>
+                <input type="number" 
+                       id="modalTarget" 
+                       class="input input-bordered input-sm w-full" 
+                       placeholder="e.g., 2.5"
+                       step="0.1"
+                       min="0">
+            </div>
+            
+            <div class="modal-action mt-2 p-0">
+                <button type="button" class="btn btn-sm btn-ghost" onclick="closeAddLevelModal()">Cancel</button>
+                <button type="submit" class="btn btn-sm btn-primary">Add</button>
+            </div>
+        </form>
+    </div>
+    <div class="modal-backdrop" onclick="closeAddLevelModal()"></div>
+</div>
+
 <!-- Paper Trades Section -->
 <div class="card bg-base-100 shadow-xl mb-8">
     <div class="card-body">
@@ -513,7 +577,7 @@ function renderCustomStocks() {
                 </div>
                 <div class="text-xs text-base-content/60 italic mb-4" id="updated-${safeKey}">--</div>
                 <div class="card-actions justify-end">
-                    <button class="btn btn-sm btn-primary" onclick="addStockLevel('${stock.key}')">
+                    <button class="btn btn-sm btn-primary" onclick="openAddLevelModal('${stock.key}', '${stock.exchange}', '${stock.symbol}')">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
                         </svg>
@@ -675,6 +739,117 @@ function addStockLevel(stockKey) {
         target_percentage: null
     });
     renderAllStockLevels();
+}
+
+// Open Add Level Modal
+function openAddLevelModal(stockKey, exchange, symbol) {
+    const modal = document.getElementById('addLevelModal');
+    const stockNameEl = document.getElementById('modalStockName');
+    const currentPriceEl = document.getElementById('modalCurrentPrice');
+    const entryPriceEl = document.getElementById('modalEntryPrice');
+    const stopLossEl = document.getElementById('modalStopLoss');
+    const targetEl = document.getElementById('modalTarget');
+    
+    // Set stock information
+    document.getElementById('modalStockKey').value = stockKey;
+    document.getElementById('modalStockExchange').value = exchange;
+    document.getElementById('modalStockSymbol').value = symbol;
+    
+    stockNameEl.textContent = `${symbol} (${exchange})`;
+    
+    // Get current price from the stock card
+    const safeKey = stockKey.replace(/:/g, '-');
+    const priceEl = document.getElementById(`price-${safeKey}`);
+    const currentPrice = priceEl ? parseFloat(priceEl.textContent.replace(/[₹,]/g, '')) : 0;
+    
+    if (currentPrice > 0 && !isNaN(currentPrice)) {
+        currentPriceEl.textContent = `₹${currentPrice.toFixed(2)}`;
+        // Pre-fill entry price with current price
+        entryPriceEl.value = currentPrice.toFixed(2);
+    } else {
+        currentPriceEl.textContent = 'N/A';
+        entryPriceEl.value = '';
+    }
+    
+    // Clear other fields
+    stopLossEl.value = '';
+    targetEl.value = '';
+    
+    // Show modal
+    modal.classList.add('modal-open');
+    // Focus on entry price input
+    setTimeout(() => entryPriceEl.focus(), 100);
+}
+
+// Close Add Level Modal
+function closeAddLevelModal() {
+    const modal = document.getElementById('addLevelModal');
+    modal.classList.remove('modal-open');
+    // Reset form
+    document.getElementById('addLevelForm').reset();
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', function(event) {
+    if (event.key === 'Escape') {
+        const modal = document.getElementById('addLevelModal');
+        if (modal && modal.classList.contains('modal-open')) {
+            closeAddLevelModal();
+        }
+    }
+});
+
+// Handle Add Level Form Submit
+function handleAddLevelSubmit(event) {
+    event.preventDefault();
+    
+    const stockKey = document.getElementById('modalStockKey').value;
+    const exchange = document.getElementById('modalStockExchange').value;
+    const symbol = document.getElementById('modalStockSymbol').value;
+    const entryPrice = parseFloat(document.getElementById('modalEntryPrice').value);
+    const stopLoss = document.getElementById('modalStopLoss').value ? parseFloat(document.getElementById('modalStopLoss').value) : null;
+    const target = document.getElementById('modalTarget').value ? parseFloat(document.getElementById('modalTarget').value) : null;
+    
+    if (isNaN(entryPrice) || entryPrice <= 0) {
+        alert('Please enter a valid entry price');
+        return;
+    }
+    
+    // Create new level
+    if (!stockLevels[stockKey]) {
+        stockLevels[stockKey] = [];
+    }
+    
+    const levelUuid = 'temp_' + Date.now();
+    stockLevels[stockKey].push({
+        uuid: levelUuid,
+        value: entryPrice,
+        stop_loss: stopLoss,
+        target_percentage: target
+    });
+    
+    // Save to database
+    saveStockLevelToDatabase(stockKey, exchange, symbol, entryPrice, null, stopLoss, target)
+        .then((data) => {
+            if (data && data.uuid) {
+                // Update the level with the UUID from database
+                const levelIndex = stockLevels[stockKey].findIndex(l => l.uuid === levelUuid);
+                if (levelIndex !== -1) {
+                    stockLevels[stockKey][levelIndex].uuid = data.uuid;
+                }
+            }
+            console.log(`Level added: Entry=${entryPrice}, SL=${stopLoss}%, Tgt=${target}%`);
+            
+            // Close modal
+            closeAddLevelModal();
+            
+            // Refresh display
+            renderAllStockLevels();
+            updateStockLevelDisplays(stockKey);
+        })
+        .catch(error => {
+            alert('Error saving level: ' + error.message);
+        });
 }
 
 function addStockLevelFromSection() {
