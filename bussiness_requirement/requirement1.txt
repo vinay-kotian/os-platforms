@@ -1,0 +1,33 @@
+Prices Module.
+- It will fetch live stock prices for stocks which have been subsrcribed. 
+- It will stock the change in the stock prices, based on the last price which has been closed.
+- It will also publish the live prices where other modules can see the latest price and perform action on it.
+
+Alert Management System
+- For given stock you can set price point as an alert.
+- The alert can be modified.
+- The alert can be deleted.
+- Alerts will have to TTL post which it will expire or it can long term
+- Simple alert which will just tell if price breached and send it to BRE. 
+- Once alert is triggered, it will ensure that it will not send it to BRE.
+- No trade at after 3.00
+
+Businness Rule Engine
+- The trade which has been received, it will check which direction and what velocity did the price breach from in the last 20 minutes.
+- Basis on that a trade will be send to OOP Order Onchestrator Platform
+- BRE will send the Order Onchestrator Platform with below details.
+    - Instrument Name
+    - TGT
+    - SL
+    - TTL (Intraday/Longterm)
+- If the same trade is open for the same price it does not punch again. 
+
+Order Onchestrator Platform
+- Once the oder is received from BRE. It will place the order with GGT is better. 
+- It will basically place the order, and if the order is placed, it will track the price continously.
+- If the price breach SL then it auto sells it. 
+- If the time is around 3ish then sell it. 
+
+Ledger Platform
+- The overall profit and loss is calculated basis on this. 
+- Performances can be reviewed.
