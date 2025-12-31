@@ -6,6 +6,7 @@
     <title>{% block title %}Eldorado{% endblock %}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
     {% block head %}{% endblock %}
 </head>
 <body class="bg-gray-50">
@@ -15,7 +16,7 @@
             <div class="flex justify-between items-center h-16">
                 <!-- Logo/Brand -->
                 <div class="flex items-center">
-                    <a href="{{ url_for('index') }}" class="flex items-center space-x-2 group">
+                    <a href="{{ url_for('prices.index') if session.user_id else url_for('auth.login') }}" class="flex items-center space-x-2 group">
                         <div class="bg-white rounded-lg p-2 shadow-md group-hover:shadow-lg transition-shadow">
                             <i class="fas fa-chart-line text-blue-600 text-xl"></i>
                         </div>
@@ -52,6 +53,11 @@
 
                         <!-- Admin Menu -->
                         {% if session.is_admin %}
+                            <a href="{{ url_for('prices.manage_zerodha_keys') }}" 
+                               class="hidden sm:flex items-center space-x-2 px-4 py-2 text-white hover:bg-white/20 rounded-lg transition-colors duration-200 font-medium">
+                                <i class="fas fa-key"></i>
+                                <span>Zerodha Keys</span>
+                            </a>
                             <a href="{{ url_for('auth.list_users') }}" 
                                class="hidden sm:flex items-center space-x-2 px-4 py-2 text-white hover:bg-white/20 rounded-lg transition-colors duration-200 font-medium">
                                 <i class="fas fa-users"></i>

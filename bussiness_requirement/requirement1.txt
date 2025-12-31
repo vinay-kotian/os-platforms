@@ -1,7 +1,13 @@
 Prices Module.
+- Create page which will also be the lading page for anybody who logs in.
+- The user can subsrcribe to any instruement.
+- There has to be search text box where the user can search for those stocks or instruments. 
 - It will fetch live stock prices for stocks which have been subsrcribed. 
 - It will stock the change in the stock prices, based on the last price which has been closed.
 - It will also publish the live prices where other modules can see the latest price and perform action on it.
+- The prices will be fetched from zerodha. 
+- Allow the admin to only add the keys of zerodha.
+
 
 Alert Management System
 - For given stock you can set price point as an alert.
