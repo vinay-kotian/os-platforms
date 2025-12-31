@@ -150,12 +150,14 @@ def get_prices():
 @admin_required
 def manage_zerodha_keys():
     """Admin page for managing Zerodha API keys."""
+    user_id = session.get('user_id')
     zerodha = ZerodhaService()
     keys = zerodha.db.get_zerodha_keys()
     
     return render_template('prices/zerodha_keys.html', 
                          keys=keys,
-                         configured=zerodha.is_configured())
+                         configured=zerodha.is_configured(),
+                         zerodha_authenticated=zerodha.is_authenticated(user_id))
 
 
 @prices_bp.route('/admin/zerodha-keys', methods=['POST'])
@@ -203,12 +205,18 @@ def zerodha_login():
     
     if not zerodha.is_configured():
         flash('Zerodha API keys are not configured. Please contact administrator.', 'error')
+        # Redirect to keys page if admin, otherwise to prices page
+        if session.get('is_admin'):
+            return redirect(url_for('prices.manage_zerodha_keys'))
         return redirect(url_for('prices.index'))
     
     login_url = zerodha.get_login_url()
     
     if not login_url:
         flash('Failed to generate Zerodha login URL', 'error')
+        # Redirect to keys page if admin, otherwise to prices page
+        if session.get('is_admin'):
+            return redirect(url_for('prices.manage_zerodha_keys'))
         return redirect(url_for('prices.index'))
     
     return redirect(login_url)
@@ -242,6 +250,9 @@ def zerodha_callback():
     else:
         flash('Invalid callback parameters.', 'error')
     
+    # Redirect to keys page if admin, otherwise to prices page
+    if session.get('is_admin'):
+        return redirect(url_for('prices.manage_zerodha_keys'))
     return redirect(url_for('prices.index'))
 
 
@@ -254,6 +265,9 @@ def zerodha_logout():
     db.delete_zerodha_session(user_id)
     
     flash('Disconnected from Zerodha', 'info')
+    # Redirect to keys page if admin, otherwise to prices page
+    if session.get('is_admin'):
+        return redirect(url_for('prices.manage_zerodha_keys'))
     return redirect(url_for('prices.index'))
 
 
