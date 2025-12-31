@@ -31,19 +31,25 @@
     <!-- Left Sidebar - Search & Watchlist -->
     <div class="w-80 bg-slate-900 border-r border-slate-800 flex flex-col">
         <!-- Search Section - Seamlessly integrated -->
-        <div class="px-3 pt-3 pb-2">
+        <div class="px-3 pt-3 pb-2 relative">
             <div class="relative">
                 <input type="text" 
                        id="searchInput" 
                        placeholder="Search eg: infy bse, nifty fut, index fund, etc"
                        class="w-full px-3 py-2 pl-9 bg-slate-800/50 border-0 rounded text-white placeholder-slate-500 focus:outline-none focus:bg-slate-800 focus:ring-1 focus:ring-emerald-500/50 text-sm transition-all"
-                       onkeyup="handleSearch(event)">
+                       onkeyup="handleSearch(event)"
+                       onfocus="handleSearchFocus()"
+                       onblur="handleSearchBlur()">
                 <i class="fas fa-search absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+            </div>
+            <!-- Search Results Container -->
+            <div id="sidebarSearchResults" class="hidden absolute z-50 left-3 right-3 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-h-96 overflow-y-auto">
+                <div id="sidebarSearchResultsContent" class="p-2"></div>
             </div>
         </div>
 
         <!-- Watchlist Header -->
-        <div class="px-3 py-2 flex items-center justify-between border-b border-slate-800/50">
+        <div id="watchlistHeader" class="px-3 py-2 flex items-center justify-between border-b border-slate-800/50">
             <div class="flex items-center space-x-2">
                 <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Watchlist</span>
                 <span class="text-xs text-slate-600" id="watchlistCount">
@@ -61,8 +67,8 @@
         </div>
 
         <!-- Watchlist Items -->
-        <div class="flex-1 overflow-y-auto">
-            <div id="watchlistContainer" class="px-2 py-1">
+        <div id="watchlistContainer" class="flex-1 overflow-y-auto">
+            <div id="watchlistItems" class="px-2 py-1">
                 {% if subscriptions %}
                     {% for sub in subscriptions %}
                     <div class="watchlist-item px-2 py-2 rounded cursor-pointer group border-b border-slate-800/30 last:border-0" 
@@ -224,6 +230,7 @@
 
 <script>
 let searchTimeout;
+let searchResultsVisible = false;
 
 function openSearchModal() {
     document.getElementById('searchModal').classList.remove('hidden');
@@ -233,6 +240,47 @@ function openSearchModal() {
 function closeSearchModal() {
     document.getElementById('searchModal').classList.add('hidden');
     document.getElementById('searchResults').innerHTML = '';
+}
+
+function handleSearchFocus() {
+    const query = document.getElementById('searchInput')?.value.trim();
+    if (query) {
+        showSidebarSearchResults();
+    }
+}
+
+function handleSearchBlur() {
+    // Delay hiding to allow clicks on results
+    setTimeout(() => {
+        // Only hide if focus didn't move to results container
+        const resultsDiv = document.getElementById('sidebarSearchResults');
+        const isFocusedOnResults = resultsDiv && (resultsDiv.contains(document.activeElement) || resultsDiv.matches(':hover'));
+        if (!isFocusedOnResults) {
+            hideSidebarSearchResults();
+        }
+    }, 200);
+}
+
+function showSidebarSearchResults() {
+    const resultsDiv = document.getElementById('sidebarSearchResults');
+    if (resultsDiv) {
+        resultsDiv.classList.remove('hidden');
+        searchResultsVisible = true;
+        // Hide watchlist when showing search results
+        document.getElementById('watchlistHeader')?.classList.add('hidden');
+        document.getElementById('watchlistContainer')?.classList.add('hidden');
+    }
+}
+
+function hideSidebarSearchResults() {
+    const resultsDiv = document.getElementById('sidebarSearchResults');
+    if (resultsDiv) {
+        resultsDiv.classList.add('hidden');
+        searchResultsVisible = false;
+        // Show watchlist again
+        document.getElementById('watchlistHeader')?.classList.remove('hidden');
+        document.getElementById('watchlistContainer')?.classList.remove('hidden');
+    }
 }
 
 function handleSearch(event) {
@@ -245,16 +293,39 @@ function handleSearch(event) {
 }
 
 async function performSearch() {
-    const query = document.getElementById('searchInput')?.value.trim() || document.getElementById('modalSearchInput')?.value.trim();
+    const sidebarInput = document.getElementById('searchInput');
+    const modalInput = document.getElementById('modalSearchInput');
+    const query = sidebarInput?.value.trim() || modalInput?.value.trim();
     const exchange = document.getElementById('exchangeSelect')?.value || '';
-    const resultsDiv = document.getElementById('searchResults');
+    
+    // Determine which results container to use
+    const isSearchingFromSidebar = sidebarInput && sidebarInput.value.trim();
+    const sidebarResultsDiv = document.getElementById('sidebarSearchResultsContent');
+    const modalResultsDiv = document.getElementById('searchResults');
+    const resultsDiv = isSearchingFromSidebar ? sidebarResultsDiv : modalResultsDiv;
     
     if (!query) {
-        resultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">Enter a search query</p>';
+        if (sidebarResultsDiv) {
+            hideSidebarSearchResults();
+        }
+        if (modalResultsDiv) {
+            modalResultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">Enter a search query</p>';
+        }
         return;
     }
     
-    resultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">Searching...</p>';
+    // Show sidebar results container if searching from sidebar
+    if (isSearchingFromSidebar && sidebarResultsDiv) {
+        showSidebarSearchResults();
+        sidebarResultsDiv.innerHTML = '<p class="text-slate-400 text-center py-4 text-sm">Searching...</p>';
+    } else if (modalResultsDiv) {
+        modalResultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">Searching...</p>';
+    }
+    
+    if (!resultsDiv) {
+        console.error('Search results container not found');
+        return;
+    }
     
     try {
         const response = await fetch('/prices/api/search', {
@@ -268,37 +339,92 @@ async function performSearch() {
         const data = await response.json();
         
         if (!response.ok) {
-            if (data.error && data.error.includes('not configured')) {
-                resultsDiv.innerHTML = `
-                    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                        <p class="text-yellow-800">${data.error}. Please contact administrator.</p>
-                    </div>
-                `;
+            const errorMsg = data.error && data.error.includes('not configured') 
+                ? `<div class="bg-yellow-900/50 border border-yellow-700 rounded-lg p-3 mb-2">
+                     <p class="text-yellow-300 text-sm">${data.error}. Please contact administrator.</p>
+                   </div>`
+                : `<p class="text-red-400 text-sm">Error: ${data.error || 'Search failed'}</p>`;
+            
+            if (isSearchingFromSidebar) {
+                sidebarResultsDiv.innerHTML = errorMsg;
             } else {
-                resultsDiv.innerHTML = `<p class="text-red-500">Error: ${data.error || 'Search failed'}</p>`;
+                modalResultsDiv.innerHTML = errorMsg;
             }
             return;
         }
         
         if (data.results && data.results.length > 0) {
-            resultsDiv.innerHTML = data.results.map(inst => `
-                <div class="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 cursor-pointer transition-colors" 
-                     onclick="subscribe('${inst.exchange}', '${inst.tradingsymbol}')">
-                    <div class="flex justify-between items-center">
-                        <div>
-                            <h4 class="font-semibold text-slate-900">${inst.name || inst.tradingsymbol}</h4>
-                            <p class="text-sm text-slate-500">${inst.exchange} • ${inst.tradingsymbol}</p>
-                            ${inst.instrument_type ? `<span class="text-xs text-slate-400">${inst.instrument_type}</span>` : ''}
+            const resultsHtml = data.results.map(inst => {
+                // Escape special characters to prevent XSS
+                const exchange = (inst.exchange || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const tradingsymbol = (inst.tradingsymbol || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const name = (inst.name || inst.tradingsymbol || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                const instrumentType = (inst.instrument_type || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                
+                // Different styling for sidebar (dark) vs modal (light)
+                if (isSearchingFromSidebar) {
+                    return `
+                    <div class="px-3 py-2 rounded cursor-pointer hover:bg-slate-700/50 transition-colors border-b border-slate-700/50 last:border-0" 
+                         onmousedown="event.preventDefault(); event.stopPropagation();"
+                         onclick="subscribe('${exchange}', '${tradingsymbol}')">
+                        <div class="flex justify-between items-center">
+                            <div class="flex-1 min-w-0">
+                                <h4 class="text-sm font-medium text-slate-200 truncate">${name}</h4>
+                                <div class="flex items-center space-x-2 mt-0.5">
+                                    <p class="text-xs text-slate-400">${exchange}</p>
+                                    <span class="text-xs text-slate-600">•</span>
+                                    <p class="text-xs text-slate-400">${tradingsymbol}</p>
+                                </div>
+                                ${instrumentType ? `<span class="text-xs text-slate-500 mt-1 inline-block">${instrumentType}</span>` : ''}
+                            </div>
+                            <i class="fas fa-plus text-emerald-500 ml-2 text-xs"></i>
                         </div>
-                        <i class="fas fa-plus text-emerald-600"></i>
                     </div>
-                </div>
-            `).join('');
+                `;
+                } else {
+                    return `
+                    <div class="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 cursor-pointer transition-colors" 
+                         onclick="subscribe('${exchange}', '${tradingsymbol}')">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h4 class="font-semibold text-slate-900">${name}</h4>
+                                <p class="text-sm text-slate-500">${exchange} • ${tradingsymbol}</p>
+                                ${instrumentType ? `<span class="text-xs text-slate-400">${instrumentType}</span>` : ''}
+                            </div>
+                            <i class="fas fa-plus text-emerald-600"></i>
+                        </div>
+                    </div>
+                `;
+                }
+            }).join('');
+            
+            if (isSearchingFromSidebar) {
+                sidebarResultsDiv.innerHTML = resultsHtml;
+            } else {
+                modalResultsDiv.innerHTML = resultsHtml;
+            }
         } else {
-            resultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">No results found</p>';
+            const noResultsMsg = isSearchingFromSidebar 
+                ? '<p class="text-slate-400 text-center py-4 text-sm">No results found</p>'
+                : '<p class="text-slate-500 text-center py-4">No results found</p>';
+            
+            if (isSearchingFromSidebar) {
+                sidebarResultsDiv.innerHTML = noResultsMsg;
+            } else {
+                modalResultsDiv.innerHTML = noResultsMsg;
+            }
         }
     } catch (error) {
-        resultsDiv.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+        console.error('Search error:', error);
+        const errorMsg = isSearchingFromSidebar
+            ? `<p class="text-red-400 text-sm">Error: ${error.message}</p>`
+            : `<p class="text-red-500">Error: ${error.message}</p>`;
+        
+        if (isSearchingFromSidebar) {
+            sidebarResultsDiv.innerHTML = errorMsg;
+        } else if (modalResultsDiv) {
+            modalResultsDiv.innerHTML = errorMsg;
+        }
     }
 }
 
@@ -326,6 +452,12 @@ async function subscribe(exchange, symbol) {
         const data = await response.json();
         
         if (data.success) {
+            // Clear search input and hide results
+            const sidebarInput = document.getElementById('searchInput');
+            if (sidebarInput) {
+                sidebarInput.value = '';
+            }
+            hideSidebarSearchResults();
             closeSearchModal();
             location.reload();
         } else {

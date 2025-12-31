@@ -31,14 +31,12 @@ class PriceService:
         if not self.zerodha.is_configured():
             return False, "Zerodha API keys not configured. Please contact administrator."
         
-        # Search for the instrument to get details
-        instruments = self.zerodha.search_instruments(symbol, exchange)
+        # Use fast lookup instead of full search
+        instrument = self.zerodha.find_instrument(exchange, symbol)
         
-        if not instruments:
+        if not instrument:
             return False, f"Instrument {exchange}:{symbol} not found"
         
-        # Use the first match
-        instrument = instruments[0]
         instrument_token = str(instrument.get('instrument_token', ''))
         tradingsymbol = instrument.get('tradingsymbol', symbol)
         

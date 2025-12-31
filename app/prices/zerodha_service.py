@@ -4,10 +4,18 @@ Zerodha KiteConnect integration service.
 from kiteconnect import KiteConnect
 from typing import Optional, Dict, List
 from app.database.models import Database
+from datetime import datetime, timedelta
+import threading
 
 
 class ZerodhaService:
     """Service for Zerodha KiteConnect operations."""
+    
+    # Class-level cache for instruments (shared across all instances)
+    _instruments_cache: Optional[List[Dict]] = None
+    _cache_timestamp: Optional[datetime] = None
+    _cache_lock = threading.Lock()
+    _cache_ttl_hours = 24  # Cache instruments for 24 hours
     
     def __init__(self):
         self.db = Database()
@@ -106,9 +114,89 @@ class ZerodhaService:
                 return False
         return False
     
+    def _get_cached_instruments(self, force_refresh: bool = False) -> List[Dict]:
+        """
+        Get instruments from cache or fetch from API if cache is stale.
+        
+        Args:
+            force_refresh: If True, force refresh from API even if cache is valid
+        
+        Returns:
+            List of instruments
+        """
+        with ZerodhaService._cache_lock:
+            now = datetime.utcnow()
+            
+            # Check if cache is valid
+            if (not force_refresh and 
+                ZerodhaService._instruments_cache is not None and 
+                ZerodhaService._cache_timestamp is not None and
+                (now - ZerodhaService._cache_timestamp) < timedelta(hours=ZerodhaService._cache_ttl_hours)):
+                return ZerodhaService._instruments_cache
+            
+            # Cache is stale or doesn't exist, fetch from API
+            if not self.kite:
+                # Return empty list if kite is not initialized
+                return []
+            
+            try:
+                print("Fetching instruments from Zerodha API (cache refresh)...")
+                instruments = self.kite.instruments()
+                ZerodhaService._instruments_cache = instruments
+                ZerodhaService._cache_timestamp = now
+                print(f"Cached {len(instruments)} instruments")
+                return instruments
+            except Exception as e:
+                print(f"Error fetching instruments: {e}")
+                # Return stale cache if available, otherwise empty list
+                if ZerodhaService._instruments_cache is not None:
+                    print("Using stale cache due to API error")
+                    return ZerodhaService._instruments_cache
+                return []
+    
+    def find_instrument(self, exchange: str, symbol: str) -> Optional[Dict]:
+        """
+        Find a specific instrument by exchange and symbol using cached data.
+        This is much faster than searching all instruments.
+        
+        Args:
+            exchange: Exchange (NSE, BSE, etc.)
+            symbol: Trading symbol
+        
+        Returns:
+            Instrument dict or None if not found
+        """
+        if not self.kite:
+            return None
+        
+        instruments = self._get_cached_instruments()
+        if not instruments:
+            return None
+        
+        # Search in cached instruments
+        exchange_upper = exchange.upper()
+        symbol_upper = symbol.upper()
+        
+        for inst in instruments:
+            if (inst.get('exchange', '').upper() == exchange_upper and 
+                inst.get('tradingsymbol', '').upper() == symbol_upper):
+                return {
+                    'instrument_token': inst.get('instrument_token'),
+                    'exchange_token': inst.get('exchange_token'),
+                    'tradingsymbol': inst.get('tradingsymbol'),
+                    'name': inst.get('name'),
+                    'exchange': inst.get('exchange'),
+                    'instrument_type': inst.get('instrument_type'),
+                    'segment': inst.get('segment'),
+                    'strike': inst.get('strike'),
+                    'lot_size': inst.get('lot_size')
+                }
+        
+        return None
+    
     def search_instruments(self, query: str, exchange: Optional[str] = None) -> List[Dict]:
         """
-        Search for instruments by name or symbol.
+        Search for instruments by name or symbol using cached data.
         
         Args:
             query: Search query (stock name or symbol)
@@ -121,12 +209,16 @@ class ZerodhaService:
             return []
         
         try:
-            # Get all instruments
-            instruments = self.kite.instruments()
+            # Get instruments from cache (much faster than API call)
+            instruments = self._get_cached_instruments()
+            
+            if not instruments:
+                return []
             
             # Filter by exchange if provided
             if exchange:
-                instruments = [inst for inst in instruments if inst.get('exchange') == exchange]
+                exchange_upper = exchange.upper()
+                instruments = [inst for inst in instruments if inst.get('exchange', '').upper() == exchange_upper]
             
             # Search by name or tradingsymbol (case-insensitive)
             query_lower = query.lower()

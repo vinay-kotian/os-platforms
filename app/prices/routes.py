@@ -58,20 +58,29 @@ def search_instruments():
     if not query:
         return jsonify({'error': 'Search query is required'}), 400
     
-    zerodha = ZerodhaService()
-    
-    if not zerodha.is_configured():
+    try:
+        zerodha = ZerodhaService()
+        
+        if not zerodha.is_configured():
+            return jsonify({
+                'error': 'Zerodha API keys not configured',
+                'configured': False
+            }), 503
+        
+        results = zerodha.search_instruments(query, exchange)
+        
         return jsonify({
-            'error': 'Zerodha API keys not configured',
-            'configured': False
-        }), 503
-    
-    results = zerodha.search_instruments(query, exchange)
-    
-    return jsonify({
-        'results': results,
-        'configured': True
-    })
+            'results': results,
+            'configured': True
+        })
+    except Exception as e:
+        print(f"Error in search_instruments route: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'error': f'Search failed: {str(e)}',
+            'results': []
+        }), 500
 
 
 @prices_bp.route('/api/subscribe', methods=['POST'])
