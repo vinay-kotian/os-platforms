@@ -6,7 +6,7 @@
 <div class="max-w-2xl mx-auto space-y-6">
     <div class="bg-white shadow-md rounded-lg p-6">
         <h1 class="text-3xl font-bold text-gray-900 mb-6">
-            <i class="fas fa-key text-blue-600"></i> Zerodha API Keys
+            <i class="fas fa-key text-emerald-600"></i> Zerodha API Keys
         </h1>
         
         {% if configured %}
@@ -28,14 +28,14 @@
         <!-- Zerodha Connection Status -->
         {% if configured %}
             {% if not zerodha_authenticated %}
-            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-2">
-                        <i class="fas fa-info-circle text-blue-600"></i>
-                        <span class="text-blue-800 font-medium">Connect to Zerodha to view live prices</span>
+                        <i class="fas fa-info-circle text-emerald-600"></i>
+                        <span class="text-emerald-800 font-medium">Connect to Zerodha to view live prices</span>
                     </div>
                     <a href="{{ url_for('prices.zerodha_login') }}" 
-                       class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                       class="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
                         <i class="fas fa-sign-in-alt"></i> Login with Zerodha
                     </a>
                 </div>
@@ -65,7 +65,7 @@
                 </label>
                 <input type="text" id="api_key" name="api_key" required
                        value="{{ keys.api_key if keys else '' }}"
-                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                        placeholder="Enter Zerodha API Key">
             </div>
             
@@ -75,25 +75,25 @@
                 </label>
                 <input type="password" id="api_secret" name="api_secret" required
                        value="{{ keys.api_secret if keys else '' }}"
-                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
                        placeholder="Enter Zerodha API Secret">
             </div>
             
-            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-2">
-                <p class="text-sm text-blue-800">
+            <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 space-y-2">
+                <p class="text-sm text-emerald-800">
                     <i class="fas fa-info-circle"></i> 
                     <strong>Note:</strong> You can get your API key and secret from 
                     <a href="https://kite.trade/apps" target="_blank" class="underline">Zerodha Kite Developer Console</a>
                 </p>
-                <p class="text-sm text-blue-800">
+                <p class="text-sm text-emerald-800">
                     <i class="fas fa-link"></i> 
                     <strong>Important:</strong> Make sure to set the redirect URL in your Zerodha app settings to:
-                    <code class="bg-blue-100 px-2 py-1 rounded">{{ request.url_root }}prices/zerodha/callback</code>
+                    <code class="bg-emerald-100 px-2 py-1 rounded">{{ request.url_root }}prices/zerodha/callback</code>
                 </p>
             </div>
             
             <button type="submit" 
-                    class="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold">
+                    class="w-full px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-semibold">
                 <i class="fas fa-save"></i> Save API Keys
             </button>
         </form>

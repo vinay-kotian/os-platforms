@@ -22,7 +22,7 @@
     </style>
     {% block head %}{% endblock %}
 </head>
-<body class="bg-gray-50">
+<body class="bg-slate-50">
     <!-- Navigation -->
     <nav class="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 border-b border-slate-700 shadow-lg">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -117,7 +117,7 @@
         {% if messages %}
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
                 {% for category, message in messages %}
-                    <div class="alert alert-{{ category }} mb-4 p-4 rounded-lg {% if category == 'error' %}bg-red-100 text-red-800{% elif category == 'success' %}bg-green-100 text-green-800{% else %}bg-blue-100 text-blue-800{% endif %}">
+                    <div class="alert alert-{{ category }} mb-4 p-4 rounded-lg {% if category == 'error' %}bg-red-100 text-red-800{% elif category == 'success' %}bg-emerald-100 text-emerald-800{% else %}bg-emerald-50 text-emerald-800{% endif %}">
                         <span>{{ message }}</span>
                     </div>
                 {% endfor %}

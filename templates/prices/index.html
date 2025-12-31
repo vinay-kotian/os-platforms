@@ -17,103 +17,209 @@
     .price-down {
         color: #ef4444;
     }
+    .watchlist-item {
+        transition: background-color 0.15s;
+    }
+    .watchlist-item:hover {
+        background-color: rgba(255, 255, 255, 0.03);
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="space-y-6">
-    <!-- Header -->
-    <div class="flex justify-between items-center">
-        <h1 class="text-3xl font-bold text-gray-900">
-            <i class="fas fa-chart-line text-blue-600"></i> Live Prices
-        </h1>
+<div class="flex h-[calc(100vh-3.5rem)] bg-slate-50">
+    <!-- Left Sidebar - Search & Watchlist -->
+    <div class="w-80 bg-slate-900 border-r border-slate-800 flex flex-col">
+        <!-- Search Section - Seamlessly integrated -->
+        <div class="px-3 pt-3 pb-2">
+            <div class="relative">
+                <input type="text" 
+                       id="searchInput" 
+                       placeholder="Search eg: infy bse, nifty fut, index fund, etc"
+                       class="w-full px-3 py-2 pl-9 bg-slate-800/50 border-0 rounded text-white placeholder-slate-500 focus:outline-none focus:bg-slate-800 focus:ring-1 focus:ring-emerald-500/50 text-sm transition-all"
+                       onkeyup="handleSearch(event)">
+                <i class="fas fa-search absolute left-3 top-2.5 text-slate-500 text-xs"></i>
+            </div>
+        </div>
+
+        <!-- Watchlist Header -->
+        <div class="px-3 py-2 flex items-center justify-between border-b border-slate-800/50">
+            <div class="flex items-center space-x-2">
+                <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Watchlist</span>
+                <span class="text-xs text-slate-600" id="watchlistCount">
+                    {{ subscriptions|length }}/250
+                </span>
+            </div>
+            <div class="flex items-center space-x-0.5">
+                <button class="text-slate-600 hover:text-slate-400 p-1 transition-colors" title="Sort">
+                    <i class="fas fa-arrow-up text-xs"></i>
+                </button>
+                <button class="text-slate-600 hover:text-slate-400 p-1 transition-colors" title="Sort">
+                    <i class="fas fa-arrow-down text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Watchlist Items -->
+        <div class="flex-1 overflow-y-auto">
+            <div id="watchlistContainer" class="px-2 py-1">
+                {% if subscriptions %}
+                    {% for sub in subscriptions %}
+                    <div class="watchlist-item px-2 py-2 rounded cursor-pointer group border-b border-slate-800/30 last:border-0" 
+                         data-exchange="{{ sub.exchange }}" 
+                         data-symbol="{{ sub.symbol }}"
+                         onclick="scrollToPriceCard('{{ sub.exchange }}', '{{ sub.symbol }}')">
+                        <div class="flex items-center justify-between">
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center space-x-2 mb-1">
+                                    <h4 class="text-sm font-medium text-slate-200 truncate">{{ sub.tradingsymbol or sub.symbol }}</h4>
+                                    <span class="text-xs text-slate-600">{{ sub.exchange }}</span>
+                                </div>
+                                <div class="flex items-baseline space-x-3">
+                                    <span class="text-sm font-semibold text-white" id="watchlist-price-{{ sub.exchange }}-{{ sub.symbol }}">
+                                        <span class="text-slate-600">--</span>
+                                    </span>
+                                    <span class="text-xs font-medium" id="watchlist-change-{{ sub.exchange }}-{{ sub.symbol }}">
+                                        <span class="text-slate-600">--</span>
+                                    </span>
+                                    <span class="text-xs font-medium" id="watchlist-percent-{{ sub.exchange }}-{{ sub.symbol }}">
+                                        <span class="text-slate-600">--</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <button onclick="event.stopPropagation(); unsubscribe('{{ sub.exchange }}', '{{ sub.symbol }}')" 
+                                    class="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 p-1 transition-all ml-2">
+                                <i class="fas fa-times text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="px-4 py-8 text-center">
+                        <i class="fas fa-chart-line text-slate-700 text-3xl mb-3"></i>
+                        <p class="text-xs text-slate-500 mb-3">No subscriptions yet</p>
+                        {% if zerodha_authenticated %}
+                        <button onclick="openSearchModal()" 
+                                class="px-3 py-1.5 bg-emerald-600/80 hover:bg-emerald-600 text-white rounded text-xs font-medium transition-colors">
+                            <i class="fas fa-plus text-xs"></i> Add Instrument
+                        </button>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Add Button - Subtle -->
         {% if zerodha_authenticated %}
-        <button onclick="openSearchModal()" 
-                class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-            <i class="fas fa-plus"></i> Subscribe to Instrument
-        </button>
+        <div class="px-3 py-2 border-t border-slate-800/50">
+            <button onclick="openSearchModal()" 
+                    class="w-full px-3 py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white rounded text-xs font-medium transition-colors flex items-center justify-center space-x-2">
+                <i class="fas fa-plus text-xs"></i>
+                <span>Add to Watchlist</span>
+            </button>
+        </div>
         {% endif %}
     </div>
 
-    <!-- Search Modal -->
-    <div id="searchModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-        <div class="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-            <div class="flex justify-between items-center mb-4">
-                <h2 class="text-2xl font-bold">Search Instruments</h2>
-                <button onclick="closeSearchModal()" class="text-gray-500 hover:text-gray-700">
-                    <i class="fas fa-times text-xl"></i>
-                </button>
+    <!-- Main Content Area -->
+    <div class="flex-1 overflow-y-auto">
+        <div class="p-6">
+            <!-- Header -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-slate-900 mb-2">
+                    <i class="fas fa-chart-line text-emerald-600"></i> Live Prices
+                </h1>
+                <p class="text-sm text-slate-600">Real-time market data and price updates</p>
             </div>
-            
-            <div class="space-y-4">
-                <div class="flex space-x-2">
-                    <select id="exchangeSelect" class="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="">All Exchanges</option>
-                        <option value="NSE">NSE</option>
-                        <option value="BSE">BSE</option>
-                        <option value="MCX">MCX</option>
-                    </select>
-                    <input type="text" id="searchInput" 
-                           placeholder="Search by name or symbol..."
-                           class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                           onkeyup="handleSearch(event)">
-                    <button onclick="performSearch()" 
-                            class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                        <i class="fas fa-search"></i> Search
-                    </button>
-                </div>
-                
-                <div id="searchResults" class="space-y-2 max-h-96 overflow-y-auto"></div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Subscriptions List -->
-    {% if subscriptions %}
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" id="pricesContainer">
-        {% for sub in subscriptions %}
-        <div class="price-card bg-white rounded-lg shadow-md p-6" data-exchange="{{ sub.exchange }}" data-symbol="{{ sub.symbol }}">
-            <div class="flex justify-between items-start mb-4">
-                <div>
-                    <h3 class="text-lg font-semibold text-gray-900">{{ sub.tradingsymbol or sub.symbol }}</h3>
-                    <p class="text-sm text-gray-500">{{ sub.exchange }}</p>
+            <!-- Price Cards Grid -->
+            {% if subscriptions %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" id="pricesContainer">
+                {% for sub in subscriptions %}
+                <div class="price-card bg-white rounded-lg shadow-md border border-slate-200 p-5" 
+                     id="card-{{ sub.exchange }}-{{ sub.symbol }}"
+                     data-exchange="{{ sub.exchange }}" 
+                     data-symbol="{{ sub.symbol }}">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex-1">
+                            <h3 class="text-lg font-bold text-slate-900">{{ sub.tradingsymbol or sub.symbol }}</h3>
+                            <p class="text-xs text-slate-500 mt-0.5">{{ sub.exchange }}</p>
+                        </div>
+                        <button onclick="unsubscribe('{{ sub.exchange }}', '{{ sub.symbol }}')" 
+                                class="text-slate-400 hover:text-red-500 transition-colors p-1">
+                            <i class="fas fa-times text-sm"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="space-y-3">
+                        <div class="text-3xl font-bold" id="price-{{ sub.exchange }}-{{ sub.symbol }}">
+                            <span class="text-slate-300">Loading...</span>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <span id="change-{{ sub.exchange }}-{{ sub.symbol }}" class="text-sm font-semibold">
+                                <span class="text-slate-300">--</span>
+                            </span>
+                            <span id="changePercent-{{ sub.exchange }}-{{ sub.symbol }}" class="text-sm font-semibold">
+                                <span class="text-slate-300">--</span>
+                            </span>
+                        </div>
+                        <div class="text-xs text-slate-400 pt-2 border-t border-slate-100" id="lastUpdated-{{ sub.exchange }}-{{ sub.symbol }}">
+                            Last updated: --
+                        </div>
+                    </div>
                 </div>
-                <button onclick="unsubscribe('{{ sub.exchange }}', '{{ sub.symbol }}')" 
-                        class="text-red-500 hover:text-red-700">
-                    <i class="fas fa-times"></i>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="bg-white rounded-lg shadow-md border border-slate-200 p-12 text-center">
+                <i class="fas fa-chart-line text-slate-300 text-6xl mb-4"></i>
+                <h3 class="text-xl font-semibold text-slate-700 mb-2">No Subscriptions Yet</h3>
+                <p class="text-slate-500 mb-4">Add instruments to your watchlist to see live prices</p>
+                {% if zerodha_authenticated %}
+                <button onclick="openSearchModal()" 
+                        class="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+                    <i class="fas fa-plus"></i> Add Instrument
+                </button>
+                {% else %}
+                <p class="text-sm text-slate-400">Please connect to Zerodha to add instruments</p>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Search Modal -->
+<div id="searchModal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+    <div class="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto shadow-xl">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-2xl font-bold text-slate-900">Search Instruments</h2>
+            <button onclick="closeSearchModal()" class="text-slate-500 hover:text-slate-700 transition-colors">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+        </div>
+        
+        <div class="space-y-4">
+            <div class="flex space-x-2">
+                <select id="exchangeSelect" class="px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 bg-white">
+                    <option value="">All Exchanges</option>
+                    <option value="NSE">NSE</option>
+                    <option value="BSE">BSE</option>
+                    <option value="MCX">MCX</option>
+                </select>
+                <input type="text" id="modalSearchInput" 
+                       placeholder="Search by name or symbol..."
+                       class="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                       onkeyup="handleSearch(event)">
+                <button onclick="performSearch()" 
+                        class="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+                    <i class="fas fa-search"></i> Search
                 </button>
             </div>
             
-            <div class="space-y-2">
-                <div class="text-3xl font-bold" id="price-{{ sub.exchange }}-{{ sub.symbol }}">
-                    <span class="text-gray-400">Loading...</span>
-                </div>
-                <div class="flex items-center space-x-2">
-                    <span id="change-{{ sub.exchange }}-{{ sub.symbol }}" class="text-sm font-medium">
-                        <span class="text-gray-400">--</span>
-                    </span>
-                    <span id="changePercent-{{ sub.exchange }}-{{ sub.symbol }}" class="text-sm font-medium">
-                        <span class="text-gray-400">--</span>
-                    </span>
-                </div>
-                <div class="text-xs text-gray-500" id="lastUpdated-{{ sub.exchange }}-{{ sub.symbol }}">
-                    Last updated: --
-                </div>
-            </div>
+            <div id="searchResults" class="space-y-2 max-h-96 overflow-y-auto"></div>
         </div>
-        {% endfor %}
     </div>
-    {% else %}
-    <div class="bg-white rounded-lg shadow-md p-12 text-center">
-        <i class="fas fa-chart-line text-gray-300 text-6xl mb-4"></i>
-        <h3 class="text-xl font-semibold text-gray-700 mb-2">No Subscriptions Yet</h3>
-        <p class="text-gray-500 mb-4">Subscribe to instruments to see live prices</p>
-        <button onclick="openSearchModal()" 
-                class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-            <i class="fas fa-plus"></i> Subscribe Now
-        </button>
-    </div>
-    {% endif %}
 </div>
 
 <script>
@@ -121,7 +227,7 @@ let searchTimeout;
 
 function openSearchModal() {
     document.getElementById('searchModal').classList.remove('hidden');
-    document.getElementById('searchInput').focus();
+    document.getElementById('modalSearchInput').focus();
 }
 
 function closeSearchModal() {
@@ -139,16 +245,16 @@ function handleSearch(event) {
 }
 
 async function performSearch() {
-    const query = document.getElementById('searchInput').value.trim();
-    const exchange = document.getElementById('exchangeSelect').value;
+    const query = document.getElementById('searchInput')?.value.trim() || document.getElementById('modalSearchInput')?.value.trim();
+    const exchange = document.getElementById('exchangeSelect')?.value || '';
     const resultsDiv = document.getElementById('searchResults');
     
     if (!query) {
-        resultsDiv.innerHTML = '<p class="text-gray-500 text-center">Enter a search query</p>';
+        resultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">Enter a search query</p>';
         return;
     }
     
-    resultsDiv.innerHTML = '<p class="text-gray-500 text-center">Searching...</p>';
+    resultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">Searching...</p>';
     
     try {
         const response = await fetch('/prices/api/search', {
@@ -176,23 +282,34 @@ async function performSearch() {
         
         if (data.results && data.results.length > 0) {
             resultsDiv.innerHTML = data.results.map(inst => `
-                <div class="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 cursor-pointer" 
+                <div class="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 cursor-pointer transition-colors" 
                      onclick="subscribe('${inst.exchange}', '${inst.tradingsymbol}')">
                     <div class="flex justify-between items-center">
                         <div>
-                            <h4 class="font-semibold text-gray-900">${inst.name || inst.tradingsymbol}</h4>
-                            <p class="text-sm text-gray-500">${inst.exchange} • ${inst.tradingsymbol}</p>
-                            ${inst.instrument_type ? `<span class="text-xs text-gray-400">${inst.instrument_type}</span>` : ''}
+                            <h4 class="font-semibold text-slate-900">${inst.name || inst.tradingsymbol}</h4>
+                            <p class="text-sm text-slate-500">${inst.exchange} • ${inst.tradingsymbol}</p>
+                            ${inst.instrument_type ? `<span class="text-xs text-slate-400">${inst.instrument_type}</span>` : ''}
                         </div>
-                        <i class="fas fa-plus text-blue-600"></i>
+                        <i class="fas fa-plus text-emerald-600"></i>
                     </div>
                 </div>
             `).join('');
         } else {
-            resultsDiv.innerHTML = '<p class="text-gray-500 text-center">No results found</p>';
+            resultsDiv.innerHTML = '<p class="text-slate-500 text-center py-4">No results found</p>';
         }
     } catch (error) {
         resultsDiv.innerHTML = `<p class="text-red-500">Error: ${error.message}</p>`;
+    }
+}
+
+function scrollToPriceCard(exchange, symbol) {
+    const card = document.getElementById(`card-${exchange}-${symbol}`);
+    if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('ring-2', 'ring-emerald-500');
+        setTimeout(() => {
+            card.classList.remove('ring-2', 'ring-emerald-500');
+        }, 2000);
     }
 }
 
@@ -209,7 +326,7 @@ async function subscribe(exchange, symbol) {
         const data = await response.json();
         
         if (data.success) {
-            alert('Subscribed successfully!');
+            closeSearchModal();
             location.reload();
         } else {
             alert(`Error: ${data.error || 'Failed to subscribe'}`);
@@ -250,10 +367,9 @@ let socket = null;
 let isWebSocketConnected = false;
 
 function initializeWebSocket() {
-    // Configure Socket.IO to send cookies/credentials with the connection
     socket = io({
         withCredentials: true,
-        transports: ['websocket', 'polling']  // Try websocket first, fallback to polling
+        transports: ['websocket', 'polling']
     });
     
     socket.on('connect', function() {
@@ -263,9 +379,6 @@ function initializeWebSocket() {
     
     socket.on('connect_error', function(error) {
         console.error('Socket.IO connection error:', error);
-        if (error.message) {
-            console.error('Error details:', error.message);
-        }
     });
     
     socket.on('disconnect', function(reason) {
@@ -275,29 +388,19 @@ function initializeWebSocket() {
     
     socket.on('websocket_status', function(data) {
         console.log('WebSocket status:', data);
-        if (data.connected) {
-            console.log('Live prices connected:', data.message);
-        } else {
-            console.warn('Live prices not available:', data.message);
-        }
     });
     
     socket.on('websocket_error', function(data) {
         console.error('WebSocket error:', data);
     });
     
-    // Listen for real-time price updates
     socket.on('price_update', function(data) {
-        console.log('Price update received:', data);
         if (data && data.instrument && data.data) {
             updateSinglePrice(data.instrument, data.data);
-        } else {
-            console.warn('Invalid price update data:', data);
         }
     });
 }
 
-// Load initial prices (fallback for first load)
 async function loadPrices() {
     try {
         const response = await fetch('/prices/api/prices');
@@ -324,11 +427,16 @@ function updateSinglePrice(instrument, priceData) {
     const changePercentEl = document.getElementById(`changePercent-${exchange}-${symbol}`);
     const lastUpdatedEl = document.getElementById(`lastUpdated-${exchange}-${symbol}`);
     
-    // Ensure we have valid numeric values
+    // Watchlist elements
+    const watchlistPriceEl = document.getElementById(`watchlist-price-${exchange}-${symbol}`);
+    const watchlistChangeEl = document.getElementById(`watchlist-change-${exchange}-${symbol}`);
+    const watchlistPercentEl = document.getElementById(`watchlist-percent-${exchange}-${symbol}`);
+    
     const lastPrice = parseFloat(priceData.last_price) || 0;
     const netChange = parseFloat(priceData.net_change) || 0;
     const changePercent = parseFloat(priceData.change_percent) || 0;
     
+    // Update main price card
     if (priceEl) {
         priceEl.innerHTML = `₹${lastPrice.toFixed(2)}`;
         priceEl.className = `text-3xl font-bold ${netChange >= 0 ? 'price-up' : 'price-down'}`;
@@ -336,7 +444,8 @@ function updateSinglePrice(instrument, priceData) {
     
     if (changeEl) {
         const sign = netChange >= 0 ? '+' : '';
-        changeEl.innerHTML = `<span class="${netChange >= 0 ? 'price-up' : 'price-down'}">${sign}${netChange.toFixed(2)}</span>`;
+        const arrow = netChange >= 0 ? '↑' : '↓';
+        changeEl.innerHTML = `<span class="${netChange >= 0 ? 'price-up' : 'price-down'}">${sign}${netChange.toFixed(2)} ${arrow}</span>`;
     }
     
     if (changePercentEl) {
@@ -348,13 +457,28 @@ function updateSinglePrice(instrument, priceData) {
         const date = priceData.last_updated ? new Date(priceData.last_updated) : new Date();
         lastUpdatedEl.textContent = `Last updated: ${date.toLocaleTimeString()}`;
     }
+    
+    // Update watchlist
+    if (watchlistPriceEl) {
+        watchlistPriceEl.innerHTML = `₹${lastPrice.toFixed(2)}`;
+        watchlistPriceEl.className = `text-sm font-bold ${netChange >= 0 ? 'price-up' : 'price-down'}`;
+    }
+    
+    if (watchlistChangeEl) {
+        const sign = netChange >= 0 ? '+' : '';
+        watchlistChangeEl.innerHTML = `<span class="${netChange >= 0 ? 'price-up' : 'price-down'}">${sign}${netChange.toFixed(2)}</span>`;
+        watchlistChangeEl.className = `text-xs font-medium ${netChange >= 0 ? 'price-up' : 'price-down'}`;
+    }
+    
+    if (watchlistPercentEl) {
+        const sign = changePercent >= 0 ? '+' : '';
+        watchlistPercentEl.innerHTML = `<span class="${changePercent >= 0 ? 'price-up' : 'price-down'}">${sign}${changePercent.toFixed(2)}%</span>`;
+        watchlistPercentEl.className = `text-xs font-medium ${changePercent >= 0 ? 'price-up' : 'price-down'}`;
+    }
 }
 
-// Initialize WebSocket connection on page load
+// Initialize on page load
 initializeWebSocket();
-
-// Load initial prices on page load (fallback)
 loadPrices();
 </script>
 {% endblock %}
-
