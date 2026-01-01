@@ -139,6 +139,20 @@ class TREService:
             
             if trade_signal_id:
                 logger.info(f"Trade signal created: {trade_signal_id} for {exchange}:{symbol} - {option_type} (trend: {trend_direction})")
+                
+                # Automatically create OOP order from signal
+                try:
+                    from app.oop.oop_service import get_oop_service
+                    oop_service = get_oop_service()
+                    oop_success, oop_order_id, oop_error = oop_service.create_order_from_signal(trade_signal_id)
+                    
+                    if oop_success:
+                        logger.info(f"OOP order created automatically: {oop_order_id} from signal {trade_signal_id}")
+                    else:
+                        logger.warning(f"Failed to create OOP order from signal {trade_signal_id}: {oop_error}")
+                except Exception as oop_error:
+                    logger.error(f"Error creating OOP order from signal: {oop_error}", exc_info=True)
+                
                 return True, trade_signal_id, None
             else:
                 return False, None, "Failed to create trade signal"

@@ -9,6 +9,7 @@ from app.prices.routes import prices_bp
 from app.alerts.routes import alerts_bp
 from app.history.routes import history_bp
 from app.tre.routes import tre_bp
+from app.oop.routes import oop_bp
 from app.database.models import Database
 from app.auth.auth_service import AuthService
 
@@ -50,6 +51,7 @@ def create_app():
     app.register_blueprint(alerts_bp)
     app.register_blueprint(history_bp)
     app.register_blueprint(tre_bp)
+    app.register_blueprint(oop_bp)
     
     # Register SocketIO handlers
     from app.prices.routes import register_socketio_handlers
@@ -66,6 +68,12 @@ def create_app():
     alert_monitor = AlertMonitor()
     alert_monitor.start()  # Start monitoring price updates
     app.alert_monitor = alert_monitor  # Make it accessible via app context
+    
+    # Initialize and start OOP order monitor
+    from app.oop.oop_service import get_oop_service
+    oop_service = get_oop_service()
+    oop_service.start_monitoring()  # Start monitoring orders
+    app.oop_service = oop_service  # Make it accessible via app context
     
     # Root route - redirect to prices if logged in, otherwise to login
     @app.route('/')
