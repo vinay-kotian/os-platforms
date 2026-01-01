@@ -6,6 +6,7 @@ from threading import Lock
 from kiteconnect import KiteTicker
 from app.database.models import Database
 from app.prices.zerodha_service import ZerodhaService
+from app.prices.price_publisher import PricePublisher
 from flask_socketio import SocketIO
 import logging
 
@@ -41,6 +42,7 @@ class WebSocketService:
         self.token_previous_close: Dict[int, float] = {}  # Store previous close for each token
         self.is_connected = False
         self._lock = Lock()
+        self.price_publisher = PricePublisher()
         self._initialized = True
     
     def set_socketio(self, socketio: SocketIO):
@@ -140,6 +142,10 @@ class WebSocketService:
                         'instrument': f"{exchange}:{symbol}",
                         'data': price_data
                     })
+                
+                # Publish to internal pub/sub system for other modules
+                instrument_key = f"{exchange}:{symbol}"
+                self.price_publisher.publish(instrument_key, price_data)
         except Exception as e:
             logger.error(f"Error processing tick data: {e}", exc_info=True)
     

@@ -49,6 +49,12 @@ def create_app():
     from app.prices.routes import register_socketio_handlers
     register_socketio_handlers(socketio, app)
     
+    # Initialize and start price publisher for internal pub/sub
+    from app.prices.price_publisher import PricePublisher
+    price_publisher = PricePublisher()
+    price_publisher.start()
+    app.price_publisher = price_publisher  # Make it accessible via app context
+    
     # Root route - redirect to prices if logged in, otherwise to login
     @app.route('/')
     def index():
