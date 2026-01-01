@@ -614,10 +614,10 @@ async function subscribe(exchange, symbol) {
             closeSearchModal();
             location.reload();
         } else {
-            alert(`Error: ${data.error || 'Failed to subscribe'}`);
+            console.error(`Error: ${data.error || 'Failed to subscribe'}`);
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        console.error(`Error: ${error.message}`);
     }
 }
 
@@ -746,10 +746,6 @@ function togglePriceCards() {
 }
 
 async function unsubscribe(exchange, symbol) {
-    if (!confirm(`Unsubscribe from ${exchange}:${symbol}?`)) {
-        return;
-    }
-    
     try {
         const response = await fetch('/prices/api/unsubscribe', {
             method: 'POST',
@@ -764,10 +760,10 @@ async function unsubscribe(exchange, symbol) {
         if (data.success) {
             location.reload();
         } else {
-            alert(`Error: ${data.error || 'Failed to unsubscribe'}`);
+            console.error(`Error: ${data.error || 'Failed to unsubscribe'}`);
         }
     } catch (error) {
-        alert(`Error: ${error.message}`);
+        console.error(`Error: ${error.message}`);
     }
 }
 
