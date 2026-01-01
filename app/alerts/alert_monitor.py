@@ -163,7 +163,10 @@ class AlertMonitor:
                     # Mark level alert as triggered
                     self.alert_service.mark_level_alert_triggered(level_alert['level_alert_id'])
                     
-                    # Send to BRE
+                    # Send to TRE (Trade Rule Engine)
+                    self._send_to_tre(level_alert, price_data, current_price)
+                    
+                    # Send to BRE (Business Rule Engine) - keeping for backward compatibility
                     self._send_to_bre(level_alert, price_data, current_price)
         
         except Exception as e:
@@ -204,6 +207,44 @@ class AlertMonitor:
         
         except Exception as e:
             logger.error(f"Error sending level alert to BRE: {e}", exc_info=True)
+    
+    def _send_to_tre(self, level_alert: Dict, price_data: Dict, current_price: float):
+        """
+        Send triggered level alert to Trade Rule Engine (TRE).
+        
+        Args:
+            level_alert: Level alert dictionary
+            price_data: Current price data
+            current_price: Current price that reached the level
+        """
+        try:
+            tre_message = {
+                'level_alert_id': level_alert['level_alert_id'],
+                'user_id': level_alert['user_id'],
+                'instrument': f"{level_alert['exchange']}:{level_alert['symbol']}",
+                'exchange': level_alert['exchange'],
+                'symbol': level_alert['symbol'],
+                'price_level': level_alert['price_level'],
+                'current_price': current_price,
+                'triggered_at': datetime.utcnow().isoformat(),
+                'price_data': price_data
+            }
+            
+            # Send to TRE via direct service call (no Flask context needed)
+            try:
+                from app.tre.tre_service import TREService
+                tre_service = TREService(level_alert['user_id'])
+                success, trade_signal_id, error = tre_service.process_alert(tre_message)
+                
+                if success:
+                    logger.info(f"Level alert {level_alert['level_alert_id']} processed by TRE, trade signal: {trade_signal_id}")
+                else:
+                    logger.warning(f"TRE failed to process alert {level_alert['level_alert_id']}: {error}")
+            except Exception as service_error:
+                logger.error(f"Failed to process alert in TRE: {service_error}", exc_info=True)
+        
+        except Exception as e:
+            logger.error(f"Error sending level alert to TRE: {e}", exc_info=True)
 
 
 # Convenience function

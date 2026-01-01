@@ -8,6 +8,7 @@ from app.auth.routes import auth_bp
 from app.prices.routes import prices_bp
 from app.alerts.routes import alerts_bp
 from app.history.routes import history_bp
+from app.tre.routes import tre_bp
 from app.database.models import Database
 from app.auth.auth_service import AuthService
 
@@ -48,6 +49,7 @@ def create_app():
     app.register_blueprint(prices_bp)
     app.register_blueprint(alerts_bp)
     app.register_blueprint(history_bp)
+    app.register_blueprint(tre_bp)
     
     # Register SocketIO handlers
     from app.prices.routes import register_socketio_handlers
