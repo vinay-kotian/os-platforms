@@ -31,7 +31,7 @@
     <!-- Left Sidebar - Search & Watchlist -->
     <div class="w-80 bg-slate-900 border-r border-slate-800 flex flex-col">
         <!-- Search Section - Seamlessly integrated -->
-        <div class="px-3 pt-3 pb-2 relative">
+        <div class="pl-2 pr-3 pt-3 pb-2 relative">
             <div class="relative">
                 <input type="text" 
                        id="searchInput" 
@@ -43,13 +43,13 @@
                 <i class="fas fa-search absolute left-3 top-2.5 text-slate-500 text-xs"></i>
             </div>
             <!-- Search Results Container -->
-            <div id="sidebarSearchResults" class="hidden absolute z-50 left-3 right-3 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-h-96 overflow-y-auto">
+            <div id="sidebarSearchResults" class="hidden absolute z-50 left-2 right-3 mt-1 bg-slate-800 border border-slate-700 rounded-lg shadow-xl max-h-96 overflow-y-auto">
                 <div id="sidebarSearchResultsContent" class="p-2"></div>
             </div>
         </div>
 
         <!-- Watchlist Header -->
-        <div id="watchlistHeader" class="px-3 py-2 flex items-center justify-between border-b border-slate-800/50">
+        <div id="watchlistHeader" class="pl-2 pr-3 py-2 flex items-center justify-between border-b border-slate-800/50">
             <div class="flex items-center space-x-2">
                 <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Watchlist</span>
                 <span class="text-xs text-slate-600" id="watchlistCount">
@@ -68,10 +68,10 @@
 
         <!-- Watchlist Items -->
         <div id="watchlistContainer" class="flex-1 overflow-y-auto">
-            <div id="watchlistItems" class="px-2 py-1">
+            <div id="watchlistItems" class="pl-2 pr-2 py-1">
                 {% if subscriptions %}
                     {% for sub in subscriptions %}
-                    <div class="watchlist-item px-2 py-2 rounded cursor-pointer group border-b border-slate-800/30 last:border-0" 
+                    <div class="watchlist-item pl-2 pr-2 py-2 rounded cursor-pointer group border-b border-slate-800/30 last:border-0" 
                          data-exchange="{{ sub.exchange }}" 
                          data-symbol="{{ sub.symbol }}"
                          onclick="scrollToPriceCard('{{ sub.exchange }}', '{{ sub.symbol }}')">
@@ -117,7 +117,7 @@
 
         <!-- Add Button - Subtle -->
         {% if zerodha_authenticated %}
-        <div class="px-3 py-2 border-t border-slate-800/50">
+        <div class="pl-2 pr-3 py-2 border-t border-slate-800/50">
             <button onclick="openSearchModal()" 
                     class="w-full px-3 py-2 bg-emerald-600/80 hover:bg-emerald-600 text-white rounded text-xs font-medium transition-colors flex items-center justify-center space-x-2">
                 <i class="fas fa-plus text-xs"></i>
@@ -383,10 +383,10 @@ async function performSearch() {
                 `;
                 } else {
                     return `
-                    <div class="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 cursor-pointer transition-colors" 
+                <div class="border border-slate-200 rounded-lg p-4 hover:bg-slate-50 cursor-pointer transition-colors" 
                          onclick="subscribe('${exchange}', '${tradingsymbol}')">
-                        <div class="flex justify-between items-center">
-                            <div>
+                    <div class="flex justify-between items-center">
+                        <div>
                                 <h4 class="font-semibold text-slate-900">${name}</h4>
                                 <p class="text-sm text-slate-500">${exchange} • ${tradingsymbol}</p>
                                 ${instrumentType ? `<span class="text-xs text-slate-400">${instrumentType}</span>` : ''}
