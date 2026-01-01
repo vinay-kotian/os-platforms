@@ -460,7 +460,32 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         
-        return [dict(row) for row in rows]
+        alerts = [dict(row) for row in rows]
+        
+        # Filter out expired intraday alerts (compare in Python for accurate UTC comparison)
+        if active_only:
+            now_utc = datetime.utcnow()
+            filtered_alerts = []
+            for alert in alerts:
+                # Long-term alerts never expire
+                if alert['ttl_type'] == 'longterm':
+                    filtered_alerts.append(alert)
+                # Intraday alerts expire at expires_at
+                elif alert['ttl_type'] == 'intraday':
+                    if alert.get('expires_at'):
+                        try:
+                            expires_at = datetime.fromisoformat(alert['expires_at'])
+                            if expires_at > now_utc:
+                                filtered_alerts.append(alert)
+                        except (ValueError, AttributeError):
+                            # If parsing fails, include it (better safe than sorry)
+                            filtered_alerts.append(alert)
+                    else:
+                        # No expiration set, include it
+                        filtered_alerts.append(alert)
+            return filtered_alerts
+        
+        return alerts
     
     def get_level_alert(self, level_alert_id: int, user_id: Optional[int] = None) -> Optional[Dict]:
         """Get a specific level alert by ID."""
@@ -551,7 +576,7 @@ class Database:
         return deleted
     
     def get_active_level_alerts(self) -> List[Dict]:
-        """Get all active level alerts across all users."""
+        """Get all active level alerts across all users (excluding expired alerts)."""
         conn = self.get_connection()
         cursor = conn.cursor()
         
@@ -567,7 +592,30 @@ class Database:
         rows = cursor.fetchall()
         conn.close()
         
-        return [dict(row) for row in rows]
+        alerts = [dict(row) for row in rows]
+        
+        # Filter out expired intraday alerts (compare in Python for accurate UTC comparison)
+        now_utc = datetime.utcnow()
+        filtered_alerts = []
+        for alert in alerts:
+            # Long-term alerts never expire
+            if alert['ttl_type'] == 'longterm':
+                filtered_alerts.append(alert)
+            # Intraday alerts expire at expires_at
+            elif alert['ttl_type'] == 'intraday':
+                if alert.get('expires_at'):
+                    try:
+                        expires_at = datetime.fromisoformat(alert['expires_at'])
+                        if expires_at > now_utc:
+                            filtered_alerts.append(alert)
+                    except (ValueError, AttributeError):
+                        # If parsing fails, include it (better safe than sorry)
+                        filtered_alerts.append(alert)
+                else:
+                    # No expiration set, include it
+                    filtered_alerts.append(alert)
+        
+        return filtered_alerts
     
     def mark_level_alert_triggered(self, level_alert_id: int) -> bool:
         """Mark a level alert as triggered."""
