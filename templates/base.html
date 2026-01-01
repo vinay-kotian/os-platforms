@@ -44,6 +44,17 @@
                 <!-- Navigation Items -->
                 <div class="flex items-center space-x-2">
                     {% if session.user_id %}
+                        <!-- Main Navigation Links -->
+                        <a href="{{ url_for('prices.index') }}" 
+                           class="px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-700/50 rounded-lg transition-colors text-sm font-medium">
+                            <i class="fas fa-chart-line mr-1"></i>
+                            <span class="hidden sm:inline">Live Prices</span>
+                        </a>
+                        <a href="{{ url_for('history.index') }}" 
+                           class="px-3 py-2 text-slate-300 hover:text-white hover:bg-slate-700/50 rounded-lg transition-colors text-sm font-medium">
+                            <i class="fas fa-history mr-1"></i>
+                            <span class="hidden sm:inline">History</span>
+                        </a>
                         <!-- Admin Menu Dropdown -->
                         {% if session.is_admin %}
                         <div class="relative group" id="adminMenu">

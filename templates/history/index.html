@@ -1,0 +1,418 @@
+{% extends "base.html" %}
+
+{% block title %}Historical Data - Eldorado{% endblock %}
+
+{% block head %}
+<style>
+    .candle-chart {
+        min-height: 400px;
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+        <h1 class="text-3xl font-bold text-slate-900 mb-2">
+            <i class="fas fa-chart-line text-emerald-600"></i> Historical Candle Data
+        </h1>
+        <p class="text-slate-600">Fetch and view historical price data from Zerodha Kite API</p>
+    </div>
+
+    {% if not zerodha_configured %}
+    <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+        <p class="text-yellow-800">
+            <i class="fas fa-exclamation-triangle"></i> Zerodha API keys are not configured. Please contact administrator.
+        </p>
+    </div>
+    {% elif not zerodha_authenticated %}
+    <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <p class="text-blue-800">
+            <i class="fas fa-info-circle"></i> Please <a href="{{ url_for('prices.zerodha_login') }}" class="underline font-semibold">connect to Zerodha</a> to fetch historical data.
+        </p>
+    </div>
+    {% else %}
+    
+    <!-- Search/Filter Form -->
+    <div class="bg-white rounded-lg shadow-md border border-slate-200 p-6 mb-6">
+        <form id="historyForm" onsubmit="event.preventDefault(); fetchHistory();">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+                <!-- Exchange -->
+                <div>
+                    <label for="exchangeSelect" class="block text-sm font-medium text-slate-700 mb-1">Exchange</label>
+                    <select id="exchangeSelect" required
+                            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <option value="NSE">NSE</option>
+                        <option value="BSE">BSE</option>
+                        <option value="NFO">NFO</option>
+                        <option value="MCX">MCX</option>
+                        <option value="CDS">CDS</option>
+                    </select>
+                </div>
+                
+                <!-- Symbol -->
+                <div>
+                    <label for="symbolInput" class="block text-sm font-medium text-slate-700 mb-1">Symbol</label>
+                    <input type="text" id="symbolInput" required
+                           placeholder="e.g., TCS, INFY, NIFTY"
+                           class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                
+                <!-- Interval -->
+                <div>
+                    <label for="intervalSelect" class="block text-sm font-medium text-slate-700 mb-1">Interval</label>
+                    <select id="intervalSelect" required
+                            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <option value="minute">1 Minute</option>
+                        <option value="3minute">3 Minutes</option>
+                        <option value="5minute">5 Minutes</option>
+                        <option value="10minute">10 Minutes</option>
+                        <option value="15minute">15 Minutes</option>
+                        <option value="30minute">30 Minutes</option>
+                        <option value="60minute">1 Hour</option>
+                        <option value="day" selected>Daily</option>
+                    </select>
+                </div>
+                
+                <!-- Quick Select -->
+                <div>
+                    <label for="quickSelect" class="block text-sm font-medium text-slate-700 mb-1">Quick Select</label>
+                    <select id="quickSelect" onchange="handleQuickSelect(this.value)"
+                            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                        <option value="">Custom Range</option>
+                        <option value="7">Last 7 Days</option>
+                        <option value="30">Last 30 Days</option>
+                        <option value="90">Last 90 Days</option>
+                        <option value="180">Last 6 Months</option>
+                        <option value="365">Last 1 Year</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <!-- From Date -->
+                <div>
+                    <label for="fromDate" class="block text-sm font-medium text-slate-700 mb-1">From Date</label>
+                    <input type="datetime-local" id="fromDate" required
+                           class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+                
+                <!-- To Date -->
+                <div>
+                    <label for="toDate" class="block text-sm font-medium text-slate-700 mb-1">To Date</label>
+                    <input type="datetime-local" id="toDate" required
+                           class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4 mb-4">
+                <label class="flex items-center">
+                    <input type="checkbox" id="continuousCheck" class="mr-2">
+                    <span class="text-sm text-slate-700">Continuous (for futures/options)</span>
+                </label>
+                <label class="flex items-center">
+                    <input type="checkbox" id="oiCheck" class="mr-2">
+                    <span class="text-sm text-slate-700">Include Open Interest</span>
+                </label>
+            </div>
+            
+            <div class="flex items-center space-x-3">
+                <button type="submit" 
+                        class="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors font-medium">
+                    <i class="fas fa-download mr-2"></i>Fetch Data
+                </button>
+                <button type="button" onclick="loadFromWatchlist()" 
+                        class="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors font-medium">
+                    <i class="fas fa-list mr-2"></i>Load from Watchlist
+                </button>
+            </div>
+        </form>
+    </div>
+    
+    <!-- Results Section -->
+    <div id="resultsSection" class="hidden">
+        <div class="bg-white rounded-lg shadow-md border border-slate-200 p-6 mb-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-slate-900">
+                    <i class="fas fa-chart-bar text-emerald-600"></i> Historical Data
+                </h2>
+                <div id="dataInfo" class="text-sm text-slate-600"></div>
+            </div>
+            
+            <!-- Chart Container -->
+            <div class="mb-6">
+                <canvas id="candleChart" class="candle-chart"></canvas>
+            </div>
+            
+            <!-- Data Table -->
+            <div class="overflow-x-auto">
+                <table id="dataTable" class="min-w-full divide-y divide-slate-200">
+                    <thead class="bg-slate-50">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Timestamp</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Open</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">High</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Low</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Close</th>
+                            <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Volume</th>
+                            <th id="oiHeader" class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider hidden">OI</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dataTableBody" class="bg-white divide-y divide-slate-200">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Loading Indicator -->
+    <div id="loadingIndicator" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6">
+            <div class="flex items-center space-x-3">
+                <i class="fas fa-spinner fa-spin text-emerald-600 text-2xl"></i>
+                <span class="text-lg font-medium text-slate-900">Fetching historical data...</span>
+            </div>
+        </div>
+    </div>
+    
+    {% endif %}
+</div>
+
+<script>
+let candleChart = null;
+let currentData = null;
+
+// Initialize date inputs with default values (last 30 days)
+document.addEventListener('DOMContentLoaded', function() {
+    const toDate = new Date();
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - 30);
+    
+    document.getElementById('toDate').value = formatDateTimeLocal(toDate);
+    document.getElementById('fromDate').value = formatDateTimeLocal(fromDate);
+});
+
+function formatDateTimeLocal(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function handleQuickSelect(days) {
+    if (!days) return;
+    
+    const toDate = new Date();
+    const fromDate = new Date();
+    fromDate.setDate(fromDate.getDate() - parseInt(days));
+    
+    document.getElementById('toDate').value = formatDateTimeLocal(toDate);
+    document.getElementById('fromDate').value = formatDateTimeLocal(fromDate);
+}
+
+function loadFromWatchlist() {
+    {% if subscriptions %}
+    const subscriptions = {{ subscriptions|tojson }};
+    if (subscriptions.length > 0) {
+        const first = subscriptions[0];
+        document.getElementById('exchangeSelect').value = first.exchange;
+        document.getElementById('symbolInput').value = first.symbol;
+    }
+    {% endif %}
+}
+
+async function fetchHistory() {
+    const exchange = document.getElementById('exchangeSelect').value;
+    const symbol = document.getElementById('symbolInput').value;
+    const interval = document.getElementById('intervalSelect').value;
+    const fromDateInput = document.getElementById('fromDate').value;
+    const toDateInput = document.getElementById('toDate').value;
+    const continuous = document.getElementById('continuousCheck').checked;
+    const oi = document.getElementById('oiCheck').checked;
+    
+    if (!exchange || !symbol || !fromDateInput || !toDateInput) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    // Convert datetime-local to API format (yyyy-mm-dd hh:mm:ss)
+    const fromDate = fromDateInput.replace('T', ' ') + ':00';
+    const toDate = toDateInput.replace('T', ' ') + ':00';
+    
+    // Show loading indicator
+    document.getElementById('loadingIndicator').classList.remove('hidden');
+    
+    try {
+        const response = await fetch('/history/api/fetch', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                exchange,
+                symbol,
+                interval,
+                from_date: fromDate,
+                to_date: toDate,
+                continuous,
+                oi
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.candles) {
+            currentData = data.candles;
+            displayData(data.candles, oi);
+            document.getElementById('resultsSection').classList.remove('hidden');
+        } else {
+            alert(`Error: ${data.error || 'Failed to fetch historical data'}`);
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert(`Error: ${error.message}`);
+    } finally {
+        document.getElementById('loadingIndicator').classList.add('hidden');
+    }
+}
+
+function displayData(candles, hasOI) {
+    // Update info
+    document.getElementById('dataInfo').textContent = `${candles.length} candles fetched`;
+    
+    // Show/hide OI column
+    const oiHeader = document.getElementById('oiHeader');
+    if (hasOI) {
+        oiHeader.classList.remove('hidden');
+    } else {
+        oiHeader.classList.add('hidden');
+    }
+    
+    // Update table
+    const tbody = document.getElementById('dataTableBody');
+    tbody.innerHTML = '';
+    
+    candles.forEach(candle => {
+        const row = document.createElement('tr');
+        row.className = 'hover:bg-slate-50';
+        
+        const timestamp = new Date(candle.timestamp);
+        const timestampStr = timestamp.toLocaleString('en-IN', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+        
+        row.innerHTML = `
+            <td class="px-4 py-3 text-sm text-slate-900">${timestampStr}</td>
+            <td class="px-4 py-3 text-sm text-slate-900">₹${candle.open.toFixed(2)}</td>
+            <td class="px-4 py-3 text-sm text-emerald-600">₹${candle.high.toFixed(2)}</td>
+            <td class="px-4 py-3 text-sm text-red-600">₹${candle.low.toFixed(2)}</td>
+            <td class="px-4 py-3 text-sm font-semibold text-slate-900">₹${candle.close.toFixed(2)}</td>
+            <td class="px-4 py-3 text-sm text-slate-600">${formatNumber(candle.volume)}</td>
+            ${hasOI ? `<td class="px-4 py-3 text-sm text-slate-600">${candle.oi ? formatNumber(candle.oi) : '--'}</td>` : ''}
+        `;
+        
+        tbody.appendChild(row);
+    });
+    
+    // Update chart
+    updateChart(candles);
+}
+
+function formatNumber(num) {
+    if (num >= 10000000) {
+        return (num / 10000000).toFixed(2) + 'Cr';
+    } else if (num >= 100000) {
+        return (num / 100000).toFixed(2) + 'L';
+    } else if (num >= 1000) {
+        return (num / 1000).toFixed(2) + 'K';
+    }
+    return num.toString();
+}
+
+function updateChart(candles) {
+    const ctx = document.getElementById('candleChart').getContext('2d');
+    
+    // Destroy existing chart if it exists
+    if (candleChart) {
+        candleChart.destroy();
+    }
+    
+    // Prepare data
+    const labels = candles.map(c => {
+        const date = new Date(c.timestamp);
+        return date.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+    });
+    
+    const closePrices = candles.map(c => c.close);
+    const highPrices = candles.map(c => c.high);
+    const lowPrices = candles.map(c => c.low);
+    
+    candleChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Close Price',
+                    data: closePrices,
+                    borderColor: 'rgb(16, 185, 129)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    tension: 0.1,
+                    fill: true
+                },
+                {
+                    label: 'High',
+                    data: highPrices,
+                    borderColor: 'rgb(239, 68, 68)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    tension: 0.1,
+                    borderDash: [5, 5],
+                    fill: false
+                },
+                {
+                    label: 'Low',
+                    data: lowPrices,
+                    borderColor: 'rgb(59, 130, 246)',
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.1,
+                    borderDash: [5, 5],
+                    fill: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: {
+                    display: true,
+                    position: 'top'
+                },
+                tooltip: {
+                    mode: 'index',
+                    intersect: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        callback: function(value) {
+                            return '₹' + value.toFixed(2);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+</script>
+{% endblock %}
+
