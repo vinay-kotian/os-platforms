@@ -6,6 +6,7 @@ from flask import Flask, render_template, redirect, url_for, session
 from flask_socketio import SocketIO
 from app.auth.routes import auth_bp
 from app.prices.routes import prices_bp
+from app.alerts.routes import alerts_bp
 from app.database.models import Database
 from app.auth.auth_service import AuthService
 
@@ -44,6 +45,7 @@ def create_app():
     # Register blueprints
     app.register_blueprint(auth_bp)
     app.register_blueprint(prices_bp)
+    app.register_blueprint(alerts_bp)
     
     # Register SocketIO handlers
     from app.prices.routes import register_socketio_handlers
@@ -54,6 +56,12 @@ def create_app():
     price_publisher = PricePublisher()
     price_publisher.start()
     app.price_publisher = price_publisher  # Make it accessible via app context
+    
+    # Initialize and start alert monitor
+    from app.alerts.alert_monitor import AlertMonitor
+    alert_monitor = AlertMonitor()
+    alert_monitor.start()  # Start monitoring price updates
+    app.alert_monitor = alert_monitor  # Make it accessible via app context
     
     # Root route - redirect to prices if logged in, otherwise to login
     @app.route('/')

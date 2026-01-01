@@ -29,6 +29,11 @@ def index():
     # Get current prices for subscriptions (initial load)
     prices = price_service.get_subscription_prices(user_id)
     
+    # Get user level alerts
+    from app.alerts.alert_service import AlertService
+    alert_service = AlertService(user_id)
+    level_alerts = alert_service.get_user_level_alerts(user_id, active_only=True)
+    
     # Check Zerodha login status
     zerodha_authenticated = zerodha.is_authenticated(user_id)
     zerodha_configured = zerodha.is_configured()
@@ -43,6 +48,7 @@ def index():
     return render_template('prices/index.html', 
                          subscriptions=subscriptions,
                          prices=prices,
+                         level_alerts=level_alerts,
                          zerodha_authenticated=zerodha_authenticated,
                          zerodha_configured=zerodha_configured)
 
