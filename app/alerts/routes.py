@@ -25,9 +25,19 @@ def index():
     # Get user's level alerts
     level_alerts = alert_service.get_user_level_alerts(user_id)
     
+    # Check if edit mode
+    edit_alert_id = request.args.get('edit', type=int)
+    edit_alert = None
+    if edit_alert_id:
+        edit_alert = alert_service.get_level_alert(edit_alert_id, user_id)
+        if not edit_alert:
+            edit_alert_id = None  # Invalid alert ID
+    
     return render_template('alerts/index.html',
                          level_alerts=level_alerts,
-                         subscriptions=subscriptions)
+                         subscriptions=subscriptions,
+                         edit_alert=edit_alert,
+                         edit_alert_id=edit_alert_id)
 
 
 @alerts_bp.route('/api/create', methods=['POST'])

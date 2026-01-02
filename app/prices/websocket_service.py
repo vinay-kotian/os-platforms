@@ -304,12 +304,13 @@ class WebSocketService:
                     self.subscribed_tokens.clear()
                     self.token_to_instrument.clear()
     
-    def subscribe_instruments(self, instruments: List[Dict]) -> bool:
+    def subscribe_instruments(self, instruments: List[Dict], user_id: Optional[int] = None) -> bool:
         """
         Subscribe to instruments for real-time updates.
         
         Args:
             instruments: List of instrument dicts with exchange, symbol, instrument_token
+            user_id: Optional user ID to load access token for quote fetching
         
         Returns:
             True if subscription successful, False otherwise
@@ -323,34 +324,41 @@ class WebSocketService:
             
             # First, try to get initial quotes to populate previous_close
             # This helps ensure we have previous_close for percentage calculations
-            try:
-                kite = self.zerodha_service.kite
-                if kite:
-                    instrument_strings = []
-                    for inst in instruments:
-                        exchange = inst.get('exchange')
-                        symbol = inst.get('tradingsymbol') or inst.get('symbol')
-                        if exchange and symbol:
-                            instrument_strings.append(f"{exchange}:{symbol}")
-                    
-                    if instrument_strings:
-                        quotes = kite.quote(instrument_strings)
-                        for inst_str, quote_data in quotes.items():
-                            ohlc = quote_data.get('ohlc', {})
-                            previous_close = ohlc.get('close', 0)
-                            if previous_close > 0:
-                                # Find the token for this instrument
-                                for inst in instruments:
-                                    exchange = inst.get('exchange')
-                                    symbol = inst.get('tradingsymbol') or inst.get('symbol')
-                                    if f"{exchange}:{symbol}" == inst_str:
-                                        token = int(inst.get('instrument_token', 0))
-                                        if token > 0:
-                                            self.token_previous_close[token] = float(previous_close)
-                                            break
-            except Exception as quote_error:
-                logger.warning(f"Could not fetch initial quotes: {quote_error}")
-                # Continue anyway - we'll try to get previous_close from tick data
+            # Only if user_id is provided and access token can be loaded
+            if user_id:
+                try:
+                    # Load user session to ensure access token is set
+                    if self.zerodha_service.load_user_session(user_id):
+                        kite = self.zerodha_service.kite
+                        if kite:
+                            instrument_strings = []
+                            for inst in instruments:
+                                exchange = inst.get('exchange')
+                                symbol = inst.get('tradingsymbol') or inst.get('symbol')
+                                if exchange and symbol:
+                                    instrument_strings.append(f"{exchange}:{symbol}")
+                            
+                            if instrument_strings:
+                                quotes = kite.quote(instrument_strings)
+                                for inst_str, quote_data in quotes.items():
+                                    ohlc = quote_data.get('ohlc', {})
+                                    previous_close = ohlc.get('close', 0)
+                                    if previous_close > 0:
+                                        # Find the token for this instrument
+                                        for inst in instruments:
+                                            exchange = inst.get('exchange')
+                                            symbol = inst.get('tradingsymbol') or inst.get('symbol')
+                                            if f"{exchange}:{symbol}" == inst_str:
+                                                token = int(inst.get('instrument_token', 0))
+                                                if token > 0:
+                                                    self.token_previous_close[token] = float(previous_close)
+                                                    break
+                    else:
+                        logger.debug(f"Could not load user session for user_id: {user_id}, skipping initial quotes")
+                except Exception as quote_error:
+                    # Log as debug instead of warning since this is optional
+                    logger.debug(f"Could not fetch initial quotes (optional): {quote_error}")
+                    # Continue anyway - we'll try to get previous_close from tick data
             
             for inst in instruments:
                 instrument_token = inst.get('instrument_token')

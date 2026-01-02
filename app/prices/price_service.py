@@ -79,7 +79,7 @@ class PriceService:
             
             # Subscribe to websocket
             if instruments:
-                self.websocket_service.subscribe_instruments(instruments)
+                self.websocket_service.subscribe_instruments(instruments, user_id)
         except Exception as e:
             print(f"Error updating websocket subscriptions: {e}")
     

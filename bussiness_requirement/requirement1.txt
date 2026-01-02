@@ -18,7 +18,7 @@ Alert Management System
 - Once alert is triggered, it will ensure that it will not send it to BRE.
 - No trade at after 3.00
 
-Businness Rule Engine
+Trade Rule Engine
 - The trade which has been received, it will check which direction and what velocity did the price breach from in the last 20 minutes.
 - Basis on that a trade will be send to OOP Order Onchestrator Platform
 - BRE will send the Order Onchestrator Platform with below details.
