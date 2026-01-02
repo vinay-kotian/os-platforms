@@ -284,15 +284,42 @@ class OOPService:
             current_price = price_data.get('last_price', 0)
             
             if current_price <= 0:
+                logger.debug(f"Invalid price for {instrument}: {current_price}")
                 return
             
             # Get all active orders for this instrument
             active_orders = self.db.get_active_oop_orders()
             
-            instrument_orders = [
-                order for order in active_orders
-                if order['exchange'] == exchange and order['symbol'] == symbol
-            ]
+            if not active_orders:
+                logger.debug(f"No active orders found in system")
+                return
+            
+            # Match orders by exchange and symbol (handle both symbol and tradingsymbol)
+            # Also try to match by instrument_token if available in price_data
+            instrument_token = price_data.get('instrument_token')
+            instrument_orders = []
+            for order in active_orders:
+                if order['exchange'] == exchange:
+                    matched = False
+                    # Try matching by symbol first (case-insensitive)
+                    order_symbol = order.get('symbol', '').upper()
+                    order_tradingsymbol = order.get('tradingsymbol', '').upper() if 'tradingsymbol' in order else ''
+                    symbol_upper = symbol.upper()
+                    
+                    if order_symbol == symbol_upper or order_tradingsymbol == symbol_upper:
+                        matched = True
+                    # Fallback: match by instrument_token if available
+                    elif instrument_token and order.get('instrument_token'):
+                        if str(instrument_token) == str(order['instrument_token']):
+                            matched = True
+                    
+                    if matched:
+                        instrument_orders.append(order)
+                        logger.debug(f"Matched order {order['order_id']} for {instrument} (order_symbol={order_symbol}, price_symbol={symbol_upper}, token_match={bool(instrument_token and order.get('instrument_token'))})")
+            
+            if not instrument_orders:
+                logger.debug(f"No matching orders found for {instrument} (checked {len(active_orders)} active orders)")
+                return
             
             # Check each order
             for order in instrument_orders:
@@ -317,11 +344,24 @@ class OOPService:
                 
                 # Check if entry price is reached (for pending orders)
                 if order['status'] == 'pending':
-                    # For GTT orders, we execute at entry price
-                    if abs(current_price - entry_price) <= entry_price * 0.001:  # 0.1% tolerance
+                    # For GTT orders, check if price has reached or crossed entry price
+                    # Use more lenient tolerance (0.5%) or check if price has crossed
+                    tolerance = entry_price * 0.005  # 0.5% tolerance
+                    
+                    # Check if price is within tolerance OR has crossed entry price
+                    price_crossed = False
+                    if option_type == 'CALL':
+                        # For CALL: entry is triggered when price >= entry (buying call option)
+                        price_crossed = current_price >= entry_price
+                    else:  # PUT
+                        # For PUT: entry is triggered when price <= entry (buying put option)
+                        price_crossed = current_price <= entry_price
+                    
+                    if abs(current_price - entry_price) <= tolerance or price_crossed:
                         # Entry triggered, order is now active
-                        self.db.update_oop_order_status(order['order_id'], 'active', executed_price=entry_price)
-                        logger.info(f"Order {order['order_id']} entry triggered at {entry_price}")
+                        executed_price = entry_price if abs(current_price - entry_price) <= tolerance else current_price
+                        self.db.update_oop_order_status(order['order_id'], 'active', executed_price=executed_price)
+                        logger.info(f"Order {order['order_id']} entry triggered at {executed_price} (current: {current_price}, entry: {entry_price})")
                     continue
                 
                 # For active orders, check target and stop loss
@@ -331,28 +371,40 @@ class OOPService:
                     
                     if option_type == 'CALL':
                         # For CALL: target is above, SL is below
+                        # Use >= for target (price touched or exceeded)
+                        # Use <= for stop loss (price touched or went below)
                         if current_price >= target_price:
                             # Target hit
                             exit_reason = 'target_hit'
                             executed = True
+                            logger.info(f"Order {order['order_id']} CALL target hit: current={current_price}, target={target_price}")
                         elif current_price <= stop_loss_price:
                             # Stop loss hit
                             exit_reason = 'stop_loss'
                             executed = True
+                            logger.info(f"Order {order['order_id']} CALL stop loss hit: current={current_price}, SL={stop_loss_price}")
                     else:  # PUT
                         # For PUT: target is below, SL is above
+                        # Use <= for target (price touched or went below)
+                        # Use >= for stop loss (price touched or exceeded)
                         if current_price <= target_price:
                             # Target hit
                             exit_reason = 'target_hit'
                             executed = True
+                            logger.info(f"Order {order['order_id']} PUT target hit: current={current_price}, target={target_price}")
                         elif current_price >= stop_loss_price:
                             # Stop loss hit
                             exit_reason = 'stop_loss'
                             executed = True
+                            logger.info(f"Order {order['order_id']} PUT stop loss hit: current={current_price}, SL={stop_loss_price}")
                     
                     if executed:
                         # Execute order and cancel OCO group
                         self._execute_order(order, current_price, exit_reason)
+                    else:
+                        # Log price check for debugging (only occasionally to avoid spam)
+                        if order['order_id'] % 100 == 0:  # Log every 100th check
+                            logger.debug(f"Order {order['order_id']} price check: current={current_price}, target={target_price}, SL={stop_loss_price}, option={option_type}")
             
         except Exception as e:
             logger.error(f"Error checking orders for {instrument}: {e}", exc_info=True)

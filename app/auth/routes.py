@@ -13,30 +13,41 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """User login page."""
-    db = Database()
-    auth_service = AuthService(db)
-    
-    # If already logged in, redirect to home
-    if auth_service.is_authenticated():
-        return redirect(url_for('index'))
-    
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
+    try:
+        db = Database()
+        auth_service = AuthService(db)
         
-        if not username or not password:
-            flash('Username and password are required', 'error')
-            return render_template('auth/login.html')
-        
-        success, user, error = auth_service.login(username, password)
-        
-        if success:
-            flash(f'Welcome back, {user.username}!', 'success')
+        # If already logged in, redirect to home
+        if auth_service.is_authenticated():
             return redirect(url_for('index'))
-        else:
-            flash(error or 'Login failed', 'error')
-    
-    return render_template('auth/login.html')
+        
+        if request.method == 'POST':
+            username = request.form.get('username', '').strip()
+            password = request.form.get('password', '')
+            
+            if not username or not password:
+                flash('Username and password are required', 'error')
+                return render_template('auth/login.html')
+            
+            success, user, error = auth_service.login(username, password)
+            
+            if success:
+                flash(f'Welcome back, {user.username}!', 'success')
+                return redirect(url_for('index'))
+            else:
+                flash(error or 'Login failed', 'error')
+        
+        return render_template('auth/login.html')
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Return a proper response even on error
+        try:
+            flash('An error occurred. Please try again.', 'error')
+            return render_template('auth/login.html')
+        except:
+            from flask import Response
+            return Response('Internal Server Error', status=500, mimetype='text/plain')
 
 
 @auth_bp.route('/logout', methods=['POST', 'GET'])

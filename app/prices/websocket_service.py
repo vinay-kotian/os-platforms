@@ -127,6 +127,7 @@ class WebSocketService:
                     'symbol': symbol,
                     'tradingsymbol': tradingsymbol,
                     'name': tradingsymbol,
+                    'instrument_token': instrument_token,  # Add instrument_token for better matching
                     'last_price': last_price,
                     'previous_close': previous_close,
                     'net_change': round(net_change, 2),

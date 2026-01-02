@@ -2,7 +2,7 @@
 App package initialization.
 """
 import os
-from flask import Flask, render_template, redirect, url_for, session
+from flask import Flask, render_template, redirect, url_for, session, Response
 from flask_socketio import SocketIO
 from app.auth.routes import auth_bp
 from app.prices.routes import prices_bp
@@ -37,8 +37,8 @@ def create_app():
         allow_upgrades=True,  # Allow WebSocket upgrades
         ping_timeout=60,
         ping_interval=25,
-        logger=True,  # Enable logging for debugging
-        engineio_logger=True  # Enable engineio logging
+        logger=False,  # Disable logging to reduce console output
+        engineio_logger=False  # Disable engineio logging to reduce console output
     )
     app.socketio = socketio
     
@@ -79,9 +79,41 @@ def create_app():
     @app.route('/')
     def index():
         """Home page - redirects to prices if logged in."""
-        if 'user_id' in session:
-            return redirect(url_for('prices.index'))
-        return redirect(url_for('auth.login'))
+        try:
+            if 'user_id' in session:
+                return redirect(url_for('prices.index'))
+            return redirect(url_for('auth.login'))
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            # Ensure we always return a proper response
+            try:
+                return redirect(url_for('auth.login'))
+            except:
+                # Last resort - return a simple response
+                from flask import Response
+                return Response('Internal Server Error', status=500, mimetype='text/plain')
+    
+    # Global error handler to catch WSGI errors
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        """Handle all exceptions and ensure proper response."""
+        import traceback
+        traceback.print_exc()
+        try:
+            # Try to return a proper Flask response
+            from flask import jsonify, request, has_request_context
+            if has_request_context():
+                if request.is_json or (hasattr(request, 'path') and request.path.startswith('/api/')):
+                    return jsonify({'error': 'Internal server error'}), 500
+                try:
+                    return redirect(url_for('auth.login'))
+                except:
+                    pass
+        except:
+            pass
+        # Last resort - return a simple response
+        return Response('Internal Server Error', status=500, mimetype='text/plain')
     
     return app
 
