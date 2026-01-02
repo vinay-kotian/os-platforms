@@ -23,8 +23,20 @@ def index():
         price_service = PriceService(user_id)
         subscriptions = price_service.get_user_subscriptions(user_id)
         
+        # Get filter parameter
+        status_filter = request.args.get('status', 'all').lower()
+        
         # Get user's level alerts
         level_alerts = alert_service.get_user_level_alerts(user_id)
+        
+        # Apply status filter if specified
+        if status_filter == 'active':
+            level_alerts = [alert for alert in level_alerts if alert.get('is_active') and not alert.get('is_triggered')]
+        elif status_filter == 'inactive':
+            level_alerts = [alert for alert in level_alerts if not alert.get('is_active') and not alert.get('is_triggered')]
+        elif status_filter == 'triggered':
+            level_alerts = [alert for alert in level_alerts if alert.get('is_triggered')]
+        # 'all' shows everything, no filtering needed
         
         # Check if edit mode
         edit_alert_id = request.args.get('edit', type=int)
@@ -38,7 +50,8 @@ def index():
                              level_alerts=level_alerts,
                              subscriptions=subscriptions,
                              edit_alert=edit_alert,
-                             edit_alert_id=edit_alert_id)
+                             edit_alert_id=edit_alert_id,
+                             status_filter=status_filter)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -47,7 +60,8 @@ def index():
                              level_alerts=[],
                              subscriptions=[],
                              edit_alert=None,
-                             edit_alert_id=None)
+                             edit_alert_id=None,
+                             status_filter='all')
 
 
 @alerts_bp.route('/api/create', methods=['POST'])

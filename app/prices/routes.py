@@ -33,7 +33,22 @@ def index():
         # Get user level alerts
         from app.alerts.alert_service import AlertService
         alert_service = AlertService(user_id)
-        level_alerts = alert_service.get_user_level_alerts(user_id, active_only=True)
+        
+        # Get filter parameter for level alerts
+        alert_status_filter = request.args.get('alert_status', 'active').lower()
+        
+        # Get all level alerts first
+        all_level_alerts = alert_service.get_user_level_alerts(user_id)
+        
+        # Apply status filter
+        if alert_status_filter == 'active':
+            level_alerts = [alert for alert in all_level_alerts if alert.get('is_active') and not alert.get('is_triggered')]
+        elif alert_status_filter == 'inactive':
+            level_alerts = [alert for alert in all_level_alerts if not alert.get('is_active') and not alert.get('is_triggered')]
+        elif alert_status_filter == 'triggered':
+            level_alerts = [alert for alert in all_level_alerts if alert.get('is_triggered')]
+        else:  # 'all'
+            level_alerts = all_level_alerts
         
         # Check Zerodha login status
         zerodha_authenticated = zerodha.is_authenticated(user_id)
@@ -51,7 +66,8 @@ def index():
                              prices=prices,
                              level_alerts=level_alerts,
                              zerodha_authenticated=zerodha_authenticated,
-                             zerodha_configured=zerodha_configured)
+                             zerodha_configured=zerodha_configured,
+                             alert_status_filter=alert_status_filter)
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -62,7 +78,8 @@ def index():
                              prices={},
                              level_alerts=[],
                              zerodha_authenticated=False,
-                             zerodha_configured=False)
+                             zerodha_configured=False,
+                             alert_status_filter='active')
 
 
 @prices_bp.route('/api/search', methods=['POST'])

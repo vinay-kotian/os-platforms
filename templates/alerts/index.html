@@ -101,7 +101,21 @@
             <h2 class="text-xl font-bold text-slate-900">
                 <i class="fas fa-list text-indigo-600"></i> Your Level Alerts
             </h2>
-            <span class="text-sm text-slate-600">{{ level_alerts|length }} alert{{ 's' if level_alerts|length != 1 else '' }}</span>
+            <div class="flex items-center space-x-4">
+                <!-- Status Filter -->
+                <div class="flex items-center space-x-2">
+                    <label for="statusFilter" class="text-sm font-medium text-slate-700">Filter:</label>
+                    <select id="statusFilter" 
+                            onchange="filterAlerts(this.value)"
+                            class="px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All Alerts</option>
+                        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="triggered" {% if status_filter == 'triggered' %}selected{% endif %}>Triggered</option>
+                    </select>
+                </div>
+                <span class="text-sm text-slate-600">{{ level_alerts|length }} alert{{ 's' if level_alerts|length != 1 else '' }}</span>
+            </div>
         </div>
         
         {% if level_alerts %}
@@ -212,7 +226,14 @@ async function createAlert() {
         
         if (data.success) {
             alert('Level alert created successfully!');
-            location.reload();
+            // Preserve status filter if present
+            const urlParams = new URLSearchParams(window.location.search);
+            const status = urlParams.get('status');
+            if (status && status !== 'all') {
+                window.location.href = `/alerts/?status=${status}`;
+            } else {
+                location.reload();
+            }
         } else {
             alert(`Error: ${data.error || 'Failed to create level alert'}`);
         }
@@ -248,7 +269,14 @@ async function updateAlert() {
         
         if (data.success) {
             alert('Level alert updated successfully!');
-            window.location.href = '/alerts/';
+            // Preserve status filter if present
+            const urlParams = new URLSearchParams(window.location.search);
+            const status = urlParams.get('status');
+            if (status && status !== 'all') {
+                window.location.href = `/alerts/?status=${status}`;
+            } else {
+                window.location.href = '/alerts/';
+            }
         } else {
             alert(`Error: ${data.error || 'Failed to update level alert'}`);
         }
@@ -259,11 +287,45 @@ async function updateAlert() {
 }
 
 function editAlert(alertId) {
-    window.location.href = `/alerts/?edit=${alertId}`;
+    // Preserve status filter when editing
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.set('edit', alertId);
+    // Preserve status filter if present
+    const status = urlParams.get('status') || 'all';
+    if (status !== 'all') {
+        urlParams.set('status', status);
+    }
+    window.location.href = `/alerts/?${urlParams.toString()}`;
 }
 
 function cancelEdit() {
-    window.location.href = '/alerts/';
+    // Preserve status filter when canceling edit
+    const urlParams = new URLSearchParams(window.location.search);
+    urlParams.delete('edit');
+    const status = urlParams.get('status');
+    if (status && status !== 'all') {
+        window.location.href = `/alerts/?status=${status}`;
+    } else {
+        window.location.href = '/alerts/';
+    }
+}
+
+function filterAlerts(status) {
+    // Preserve edit parameter if present
+    const urlParams = new URLSearchParams(window.location.search);
+    if (status === 'all') {
+        urlParams.delete('status');
+    } else {
+        urlParams.set('status', status);
+    }
+    // Preserve edit parameter
+    const editId = urlParams.get('edit');
+    if (editId) {
+        urlParams.set('edit', editId);
+    }
+    
+    const newUrl = '/alerts/?' + urlParams.toString();
+    window.location.href = newUrl;
 }
 
 async function deleteAlert(alertId) {
@@ -280,7 +342,14 @@ async function deleteAlert(alertId) {
         
         if (data.success) {
             alert('Level alert deleted successfully!');
-            location.reload();
+            // Preserve status filter if present
+            const urlParams = new URLSearchParams(window.location.search);
+            const status = urlParams.get('status');
+            if (status && status !== 'all') {
+                window.location.href = `/alerts/?status=${status}`;
+            } else {
+                location.reload();
+            }
         } else {
             alert(`Error: ${data.error || 'Failed to delete level alert'}`);
         }

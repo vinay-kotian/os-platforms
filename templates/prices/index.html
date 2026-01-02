@@ -217,11 +217,25 @@
                         <h2 class="text-xl font-bold text-slate-900 mb-1">
                             <i class="fas fa-bell text-emerald-600"></i> Level Alerts
                         </h2>
-                        <p class="text-sm text-slate-600">Active price level alerts</p>
+                        <p class="text-sm text-slate-600">Price level alerts</p>
                     </div>
-                    <span class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                        {{ level_alerts|length }} active
-                    </span>
+                    <div class="flex items-center space-x-4">
+                        <!-- Status Filter -->
+                        <div class="flex items-center space-x-2">
+                            <label for="alertStatusFilter" class="text-xs font-medium text-slate-700">Filter:</label>
+                            <select id="alertStatusFilter" 
+                                    onchange="filterLevelAlerts(this.value)"
+                                    class="px-3 py-1.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm bg-white">
+                                <option value="active" {% if alert_status_filter == 'active' %}selected{% endif %}>Active</option>
+                                <option value="inactive" {% if alert_status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                                <option value="triggered" {% if alert_status_filter == 'triggered' %}selected{% endif %}>Triggered</option>
+                                <option value="all" {% if alert_status_filter == 'all' %}selected{% endif %}>All</option>
+                            </select>
+                        </div>
+                        <span class="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                            {{ level_alerts|length }} alert{{ 's' if level_alerts|length != 1 else '' }}
+                        </span>
+                    </div>
                 </div>
 
                 {% if level_alerts %}
@@ -723,9 +737,23 @@ async function deleteLevelAlert(levelAlertId) {
 }
 
 function editLevelAlert(levelAlertId) {
-    // For now, just reload to show edit modal or redirect to alerts page
-    // You can implement inline editing later if needed
-    window.location.href = `/alerts/?edit=${levelAlertId}`;
+    // Preserve alert status filter when editing
+    const urlParams = new URLSearchParams(window.location.search);
+    const alertStatus = urlParams.get('alert_status') || 'active';
+    window.location.href = `/alerts/?edit=${levelAlertId}&status=${alertStatus}`;
+}
+
+function filterLevelAlerts(status) {
+    // Preserve other URL parameters
+    const urlParams = new URLSearchParams(window.location.search);
+    if (status === 'active') {
+        urlParams.delete('alert_status');
+    } else {
+        urlParams.set('alert_status', status);
+    }
+    
+    const newUrl = '/prices/?' + urlParams.toString();
+    window.location.href = newUrl;
 }
 
 function togglePriceCards() {
