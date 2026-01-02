@@ -18,39 +18,51 @@ prices_bp = Blueprint('prices', __name__, url_prefix='/prices')
 @login_required
 def index():
     """Prices landing page - main page for logged-in users."""
-    user_id = session.get('user_id')
-    price_service = PriceService(user_id)
-    zerodha = ZerodhaService()
-    websocket_service = WebSocketService()
-    
-    # Get user subscriptions
-    subscriptions = price_service.get_user_subscriptions(user_id)
-    
-    # Get current prices for subscriptions (initial load)
-    prices = price_service.get_subscription_prices(user_id)
-    
-    # Get user level alerts
-    from app.alerts.alert_service import AlertService
-    alert_service = AlertService(user_id)
-    level_alerts = alert_service.get_user_level_alerts(user_id, active_only=True)
-    
-    # Check Zerodha login status
-    zerodha_authenticated = zerodha.is_authenticated(user_id)
-    zerodha_configured = zerodha.is_configured()
-    
-    # Initialize websocket subscriptions if authenticated
-    if zerodha_authenticated and subscriptions:
-        try:
-            price_service._update_websocket_subscriptions(user_id)
-        except Exception as e:
-            print(f"Error initializing websocket subscriptions: {e}")
-    
-    return render_template('prices/index.html', 
-                         subscriptions=subscriptions,
-                         prices=prices,
-                         level_alerts=level_alerts,
-                         zerodha_authenticated=zerodha_authenticated,
-                         zerodha_configured=zerodha_configured)
+    try:
+        user_id = session.get('user_id')
+        price_service = PriceService(user_id)
+        zerodha = ZerodhaService()
+        websocket_service = WebSocketService()
+        
+        # Get user subscriptions
+        subscriptions = price_service.get_user_subscriptions(user_id)
+        
+        # Get current prices for subscriptions (initial load)
+        prices = price_service.get_subscription_prices(user_id)
+        
+        # Get user level alerts
+        from app.alerts.alert_service import AlertService
+        alert_service = AlertService(user_id)
+        level_alerts = alert_service.get_user_level_alerts(user_id, active_only=True)
+        
+        # Check Zerodha login status
+        zerodha_authenticated = zerodha.is_authenticated(user_id)
+        zerodha_configured = zerodha.is_configured()
+        
+        # Initialize websocket subscriptions if authenticated
+        if zerodha_authenticated and subscriptions:
+            try:
+                price_service._update_websocket_subscriptions(user_id)
+            except Exception as e:
+                print(f"Error initializing websocket subscriptions: {e}")
+        
+        return render_template('prices/index.html', 
+                             subscriptions=subscriptions,
+                             prices=prices,
+                             level_alerts=level_alerts,
+                             zerodha_authenticated=zerodha_authenticated,
+                             zerodha_configured=zerodha_configured)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        flash(f'Error loading prices page: {str(e)}', 'error')
+        # Return a minimal response to avoid WSGI errors
+        return render_template('prices/index.html', 
+                             subscriptions=[],
+                             prices={},
+                             level_alerts=[],
+                             zerodha_authenticated=False,
+                             zerodha_configured=False)
 
 
 @prices_bp.route('/api/search', methods=['POST'])

@@ -14,30 +14,40 @@ alerts_bp = Blueprint('alerts', __name__, url_prefix='/alerts')
 @login_required
 def index():
     """Alerts management page."""
-    user_id = session.get('user_id')
-    alert_service = AlertService(user_id)
-    
-    # Get user's subscriptions to show in dropdown
-    from app.prices.price_service import PriceService
-    price_service = PriceService(user_id)
-    subscriptions = price_service.get_user_subscriptions(user_id)
-    
-    # Get user's level alerts
-    level_alerts = alert_service.get_user_level_alerts(user_id)
-    
-    # Check if edit mode
-    edit_alert_id = request.args.get('edit', type=int)
-    edit_alert = None
-    if edit_alert_id:
-        edit_alert = alert_service.get_level_alert(edit_alert_id, user_id)
-        if not edit_alert:
-            edit_alert_id = None  # Invalid alert ID
-    
-    return render_template('alerts/index.html',
-                         level_alerts=level_alerts,
-                         subscriptions=subscriptions,
-                         edit_alert=edit_alert,
-                         edit_alert_id=edit_alert_id)
+    try:
+        user_id = session.get('user_id')
+        alert_service = AlertService(user_id)
+        
+        # Get user's subscriptions to show in dropdown
+        from app.prices.price_service import PriceService
+        price_service = PriceService(user_id)
+        subscriptions = price_service.get_user_subscriptions(user_id)
+        
+        # Get user's level alerts
+        level_alerts = alert_service.get_user_level_alerts(user_id)
+        
+        # Check if edit mode
+        edit_alert_id = request.args.get('edit', type=int)
+        edit_alert = None
+        if edit_alert_id:
+            edit_alert = alert_service.get_level_alert(edit_alert_id, user_id)
+            if not edit_alert:
+                edit_alert_id = None  # Invalid alert ID
+        
+        return render_template('alerts/index.html',
+                             level_alerts=level_alerts,
+                             subscriptions=subscriptions,
+                             edit_alert=edit_alert,
+                             edit_alert_id=edit_alert_id)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        # Return a minimal response to avoid WSGI errors
+        return render_template('alerts/index.html',
+                             level_alerts=[],
+                             subscriptions=[],
+                             edit_alert=None,
+                             edit_alert_id=None)
 
 
 @alerts_bp.route('/api/create', methods=['POST'])
