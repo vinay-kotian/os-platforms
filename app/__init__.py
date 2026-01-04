@@ -84,24 +84,23 @@ def create_app():
                 return redirect(url_for('prices.index'))
             return redirect(url_for('auth.login'))
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            # Log error without printing to stderr (which can interfere with WSGI)
+            import logging
+            logging.error(f"Error in root route: {e}", exc_info=True)
             # Ensure we always return a proper response
             try:
                 return redirect(url_for('auth.login'))
             except:
                 # Last resort - return a simple response
-                from flask import Response
                 return Response('Internal Server Error', status=500, mimetype='text/plain')
     
-    # Global error handler to catch WSGI errors
-    @app.errorhandler(Exception)
-    def handle_exception(e):
-        """Handle all exceptions and ensure proper response."""
-        import traceback
-        traceback.print_exc()
+    # Global error handler to catch WSGI errors (but not SocketIO errors)
+    @app.errorhandler(500)
+    def handle_500_error(e):
+        """Handle 500 errors and ensure proper response."""
+        import logging
+        logging.error(f"Internal server error: {e}", exc_info=True)
         try:
-            # Try to return a proper Flask response
             from flask import jsonify, request, has_request_context
             if has_request_context():
                 if request.is_json or (hasattr(request, 'path') and request.path.startswith('/api/')):

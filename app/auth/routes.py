@@ -39,8 +39,9 @@ def login():
         
         return render_template('auth/login.html')
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        # Log error without printing to stderr (which can interfere with WSGI)
+        import logging
+        logging.error(f"Error in login route: {e}", exc_info=True)
         # Return a proper response even on error
         try:
             flash('An error occurred. Please try again.', 'error')

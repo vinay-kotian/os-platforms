@@ -22,8 +22,8 @@ def login_required(f):
             
             return f(*args, **kwargs)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            import logging
+            logging.error(f"Error in login_required middleware: {e}", exc_info=True)
             # Ensure we always return a proper response
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Internal server error'}), 500
@@ -52,8 +52,8 @@ def admin_required(f):
             
             return f(*args, **kwargs)
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            import logging
+            logging.error(f"Error in login_required middleware: {e}", exc_info=True)
             # Ensure we always return a proper response
             if request.is_json or request.path.startswith('/api/'):
                 return jsonify({'error': 'Internal server error'}), 500

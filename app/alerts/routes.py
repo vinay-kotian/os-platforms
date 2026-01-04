@@ -53,8 +53,8 @@ def index():
                              edit_alert_id=edit_alert_id,
                              status_filter=status_filter)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import logging
+        logging.error(f"Error in alerts index route: {e}", exc_info=True)
         # Return a minimal response to avoid WSGI errors
         return render_template('alerts/index.html',
                              level_alerts=[],

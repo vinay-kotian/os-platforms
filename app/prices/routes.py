@@ -59,7 +59,8 @@ def index():
             try:
                 price_service._update_websocket_subscriptions(user_id)
             except Exception as e:
-                print(f"Error initializing websocket subscriptions: {e}")
+                import logging
+                logging.debug(f"Error initializing websocket subscriptions: {e}")
         
         return render_template('prices/index.html', 
                              subscriptions=subscriptions,
@@ -69,8 +70,8 @@ def index():
                              zerodha_configured=zerodha_configured,
                              alert_status_filter=alert_status_filter)
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        import logging
+        logging.error(f"Error loading prices page: {e}", exc_info=True)
         flash(f'Error loading prices page: {str(e)}', 'error')
         # Return a minimal response to avoid WSGI errors
         return render_template('prices/index.html', 
@@ -109,9 +110,8 @@ def search_instruments():
             'configured': True
         })
     except Exception as e:
-        print(f"Error in search_instruments route: {e}")
-        import traceback
-        traceback.print_exc()
+        import logging
+        logging.error(f"Error in search_instruments route: {e}", exc_info=True)
         return jsonify({
             'error': f'Search failed: {str(e)}',
             'results': []
