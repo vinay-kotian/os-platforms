@@ -94,24 +94,20 @@ def create_app():
                 # Last resort - return a simple response
                 return Response('Internal Server Error', status=500, mimetype='text/plain')
     
-    # Global error handler to catch WSGI errors (but not SocketIO errors)
+    # Global error handler to catch unexpected exceptions (WSGI-safe)
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(e):
+        """Handle all exceptions and return a simple, safe response."""
+        import logging
+        logging.error(f"Unexpected error: {e}", exc_info=True)
+        # Always return a simple response to avoid WSGI write-before-start issues
+        return Response('Internal Server Error', status=500, mimetype='text/plain')
+    
+    # Explicit 500 handler (kept minimal)
     @app.errorhandler(500)
     def handle_500_error(e):
-        """Handle 500 errors and ensure proper response."""
         import logging
         logging.error(f"Internal server error: {e}", exc_info=True)
-        try:
-            from flask import jsonify, request, has_request_context
-            if has_request_context():
-                if request.is_json or (hasattr(request, 'path') and request.path.startswith('/api/')):
-                    return jsonify({'error': 'Internal server error'}), 500
-                try:
-                    return redirect(url_for('auth.login'))
-                except:
-                    pass
-        except:
-            pass
-        # Last resort - return a simple response
         return Response('Internal Server Error', status=500, mimetype='text/plain')
     
     return app

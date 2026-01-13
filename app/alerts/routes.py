@@ -68,120 +68,139 @@ def index():
 @login_required
 def create_level_alert():
     """Create a new level alert."""
-    data = request.get_json()
-    user_id = session.get('user_id')
-    
-    exchange = data.get('exchange', '').strip().upper()
-    symbol = data.get('symbol', '').strip().upper()
-    price_level = data.get('price_level')
-    ttl_type = data.get('ttl_type', 'intraday').strip().lower()
-    expires_at = data.get('expires_at', '').strip() or None
-    
-    # Validation
-    if not exchange or not symbol:
-        return jsonify({'error': 'Exchange and symbol are required'}), 400
-    
-    if price_level is None or price_level <= 0:
-        return jsonify({'error': 'Valid price level is required'}), 400
-    
-    if ttl_type not in ['intraday', 'longterm']:
-        return jsonify({'error': "TTL type must be 'intraday' or 'longterm'"}), 400
-    
-    alert_service = AlertService(user_id)
-    success, level_alert_id, error = alert_service.create_level_alert(
-        user_id=user_id,
-        exchange=exchange,
-        symbol=symbol,
-        price_level=float(price_level),
-        ttl_type=ttl_type,
-        expires_at=expires_at
-    )
-    
-    if success:
-        return jsonify({
-            'success': True,
-            'level_alert_id': level_alert_id,
-            'message': 'Level alert created successfully'
-        })
-    else:
-        return jsonify({
-            'success': False,
-            'error': error or 'Failed to create level alert'
-        }), 400
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+        user_id = session.get('user_id')
+        
+        exchange = data.get('exchange', '').strip().upper()
+        symbol = data.get('symbol', '').strip().upper()
+        price_level = data.get('price_level')
+        ttl_type = data.get('ttl_type', 'intraday').strip().lower()
+        expires_at = data.get('expires_at', '').strip() or None
+        
+        # Validation
+        if not exchange or not symbol:
+            return jsonify({'error': 'Exchange and symbol are required'}), 400
+        
+        if price_level is None or price_level <= 0:
+            return jsonify({'error': 'Valid price level is required'}), 400
+        
+        if ttl_type not in ['intraday', 'longterm']:
+            return jsonify({'error': "TTL type must be 'intraday' or 'longterm'"}), 400
+        
+        alert_service = AlertService(user_id)
+        success, level_alert_id, error = alert_service.create_level_alert(
+            user_id=user_id,
+            exchange=exchange,
+            symbol=symbol,
+            price_level=float(price_level),
+            ttl_type=ttl_type,
+            expires_at=expires_at
+        )
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'level_alert_id': level_alert_id,
+                'message': 'Level alert created successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': error or 'Failed to create level alert'
+            }), 400
+    except Exception as e:
+        import logging
+        logging.error(f"Error in create_level_alert: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 
 @alerts_bp.route('/api/update/<int:level_alert_id>', methods=['PUT'])
 @login_required
 def update_level_alert(level_alert_id):
     """Update a level alert."""
-    data = request.get_json()
-    user_id = session.get('user_id')
-    
-    alert_service = AlertService(user_id)
-    
-    # Get update fields
-    price_level = data.get('price_level')
-    ttl_type = data.get('ttl_type', '').strip().lower() or None
-    expires_at = data.get('expires_at', '').strip() or None
-    is_active = data.get('is_active')
-    
-    # Validate ttl_type if provided
-    if ttl_type and ttl_type not in ['intraday', 'longterm']:
-        return jsonify({'error': "TTL type must be 'intraday' or 'longterm'"}), 400
-    
-    # Convert price_level to float if provided
-    if price_level is not None:
-        try:
-            price_level = float(price_level)
-            if price_level <= 0:
-                return jsonify({'error': 'Price level must be greater than 0'}), 400
-        except (ValueError, TypeError):
-            return jsonify({'error': 'Invalid price level'}), 400
-    
-    # Convert is_active to bool if provided
-    if is_active is not None:
-        is_active = bool(is_active)
-    
-    success, error = alert_service.update_level_alert(
-        level_alert_id=level_alert_id,
-        user_id=user_id,
-        price_level=price_level,
-        ttl_type=ttl_type,
-        expires_at=expires_at,
-        is_active=is_active
-    )
-    
-    if success:
-        return jsonify({
-            'success': True,
-            'message': 'Level alert updated successfully'
-        })
-    else:
-        return jsonify({
-            'success': False,
-            'error': error or 'Failed to update level alert'
-        }), 400
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'success': False, 'error': 'Invalid JSON data'}), 400
+        user_id = session.get('user_id')
+        
+        alert_service = AlertService(user_id)
+        
+        # Get update fields
+        price_level = data.get('price_level')
+        ttl_type = data.get('ttl_type', '').strip().lower() or None
+        expires_at = data.get('expires_at', '').strip() or None
+        is_active = data.get('is_active')
+        
+        # Validate ttl_type if provided
+        if ttl_type and ttl_type not in ['intraday', 'longterm']:
+            return jsonify({'error': "TTL type must be 'intraday' or 'longterm'"}), 400
+        
+        # Convert price_level to float if provided
+        if price_level is not None:
+            try:
+                price_level = float(price_level)
+                if price_level <= 0:
+                    return jsonify({'error': 'Price level must be greater than 0'}), 400
+            except (ValueError, TypeError):
+                return jsonify({'error': 'Invalid price level'}), 400
+        
+        # Convert is_active to bool if provided
+        if is_active is not None:
+            is_active = bool(is_active)
+        
+        success, error = alert_service.update_level_alert(
+            level_alert_id=level_alert_id,
+            user_id=user_id,
+            price_level=price_level,
+            ttl_type=ttl_type,
+            expires_at=expires_at,
+            is_active=is_active
+        )
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Level alert updated successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': error or 'Failed to update level alert'
+            }), 400
+    except Exception as e:
+        import logging
+        logging.error(f"Error in update_level_alert: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 
 @alerts_bp.route('/api/delete/<int:level_alert_id>', methods=['DELETE'])
 @login_required
 def delete_level_alert(level_alert_id):
     """Delete a level alert."""
-    user_id = session.get('user_id')
-    alert_service = AlertService(user_id)
-    
-    success, error = alert_service.delete_level_alert(level_alert_id, user_id)
-    
-    if success:
-        return jsonify({
-            'success': True,
-            'message': 'Level alert deleted successfully'
-        })
-    else:
-        return jsonify({
-            'success': False,
-            'error': error or 'Failed to delete level alert'
-        }), 404
+    try:
+        user_id = session.get('user_id')
+        alert_service = AlertService(user_id)
+        
+        success, error = alert_service.delete_level_alert(level_alert_id, user_id)
+        
+        if success:
+            return jsonify({
+                'success': True,
+                'message': 'Level alert deleted successfully'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': error or 'Failed to delete level alert'
+            }), 404
+    except Exception as e:
+        import logging
+        logging.error(f"Error in delete_level_alert: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Internal server error'}), 500
 
 
 @alerts_bp.route('/api/list', methods=['GET'])
